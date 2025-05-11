@@ -22,7 +22,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 REPORT_FOLDER = "reports"
 VOICE_FOLDER = "voice_summaries"
-MODEL_PATH = "/Users/nadiajelani/Desktop/Medical Pics/wound-segmentation/models/best_unet_wound_model.h5"
+MODEL_PATH = "/opt/render/project/src/best_unet_wound_model.h5"
 
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
