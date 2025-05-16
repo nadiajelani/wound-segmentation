@@ -1,1 +1,1 @@
-# wound-detection
+# wound-segmentation
