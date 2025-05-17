@@ -521,6 +521,38 @@ def evaluate_and_visualize(model, X_test, y_test, original_images, api_key=None,
             plt.close('all')
             gc.collect()
 
+import matplotlib.pyplot as plt
+
+# Plot IOU and Loss
+def plot_training_curves(history):
+    epochs = range(1, len(history.history['loss']) + 1)
+
+    # Plot Loss
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, history.history['loss'], label='Train Loss')
+    plt.plot(epochs, history.history['val_loss'], label='Val Loss')
+    plt.title('Loss Over Epochs')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    # Plot IOU
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, history.history['iou_score'], label='Train IOU')
+    plt.plot(epochs, history.history['val_iou_score'], label='Val IOU')
+    plt.title('IOU Over Epochs')
+    plt.xlabel('Epoch')
+    plt.ylabel('IOU Score')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig('training_curves.png')
+    plt.show()
+
+# Call the function
+#plot_training_curves(history)
+
 def main():
     parser = argparse.ArgumentParser(description='Train or evaluate wound segmentation model.')
     parser.add_argument('--train_image_dir', help='Path to training images')
@@ -582,6 +614,9 @@ def main():
         epochs=args.epochs, model_save_path=args.model_save_path,
         pretrained_model_path=args.pretrained_model_path
     )
+    if history:
+        plot_training_curves(history)
+
     if not args.pretrained_model_path:
         model.summary()
     evaluate_model(model, X_test, y_test)
