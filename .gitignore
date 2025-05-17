@@ -13,3 +13,4 @@ __pycache__/
 /offline_results/
 /wounds/
 *.pth
+*.h5
