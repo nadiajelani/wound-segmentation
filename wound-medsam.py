@@ -13,8 +13,9 @@ from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLRO
 import segmentation_models as sm
 import time
 import base64
-from openai import OpenAI, APIError, RateLimitError, AuthenticationError
-from fpdf import FPDF
+from PIL import Image
+import io
+from transformers import AutoProcessor, AutoModelForCausalLM
 import torch
 from skimage import transform
 from sklearn.metrics import precision_recall_fscore_support
@@ -23,16 +24,53 @@ import gc
 from tqdm.keras import TqdmCallback
 from tensorflow.keras.utils import get_custom_objects
 from segment_anything import build_sam_vit_b
+from fpdf import FPDF
+from diffusers import StableDiffusionPipeline
+from sklearn.ensemble import IsolationForest
+from sklearn.model_selection import KFold
+from sklearn.calibration import CalibratedClassifierCV
+import shap
+import json
+from tensorflow.keras.mixed_precision import set_global_policy
+import tensorflow.keras.backend as K
+from tensorflow.keras.layers import Dropout
 
-# Register custom objects for segmentation_models compatibility
+# Enable mixed precision for TensorFlow
+set_global_policy('mixed_float16')
+
+# ---- Imports ----
+import tensorflow as tf
+import tensorflow.keras.backend as K
+from tensorflow.keras.utils import get_custom_objects
+
+# ---- Define Loss First ----
+class FocalTverskyLoss(tf.keras.losses.Loss):
+    def __init__(self, alpha=0.7, gamma=0.75):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def call(self, y_true, y_pred):
+        y_true = K.flatten(y_true)
+        y_pred = K.flatten(y_pred)
+        tp = K.sum(y_true * y_pred)
+        fn = K.sum(y_true * (1 - y_pred))
+        fp = K.sum((1 - y_true) * y_pred)
+        tversky = (tp + 1e-7) / (tp + self.alpha * fn + (1 - self.alpha) * fp + 1e-7)
+        return K.pow(1 - tversky, self.gamma)
+
+# ---- Register Custom Loss ----
 def register_segmentation_models_custom_objects():
+    from segmentation_models import metrics
     custom_objects = {
-        'binary_focal_dice_loss': sm.losses.BinaryFocalLoss() + sm.losses.DiceLoss(),
-        'iou_score': sm.metrics.IOUScore()
+        'FocalTverskyLoss': FocalTverskyLoss(),
+        'iou_score': metrics.IOUScore()
     }
     get_custom_objects().update(custom_objects)
 
+# ---- Then call it ----
 register_segmentation_models_custom_objects()
+
 
 # Configure logging
 logging.basicConfig(
@@ -49,10 +87,39 @@ if torch.cuda.is_available():
     device = "cuda:0"
 logger.info(f"Using device: {device}")
 
+# Initialize LLaVA model (use lighter 7B model)
+llava_model = None
+llava_processor = None
+try:
+    llava_model = AutoModelForCausalLM.from_pretrained("llava-hf/llava-7b-hf", torch_dtype=torch.float16)
+    llava_processor = AutoProcessor.from_pretrained("llava-hf/llava-7b-hf")
+    llava_model.to(device)
+    logger.info("Loaded LLaVA-7B model successfully")
+except Exception as e:
+    logger.error(f"Failed to load LLaVA model: {str(e)}")
+    llava_model = None
+    llava_processor = None
+
 # Optimize TensorFlow for CPU
 tf.config.set_soft_device_placement(True)
 tf.config.threading.set_inter_op_parallelism_threads(4)
 tf.config.threading.set_intra_op_parallelism_threads(4)
+
+# Custom Focal Tversky Loss
+class FocalTverskyLoss(tf.keras.losses.Loss):
+    def __init__(self, alpha=0.7, gamma=0.75):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def call(self, y_true, y_pred):
+        y_true = K.flatten(y_true)
+        y_pred = K.flatten(y_pred)
+        tp = K.sum(y_true * y_pred)
+        fn = K.sum(y_true * (1 - y_pred))
+        fp = K.sum((1 - y_true) * y_pred)
+        tversky = (tp + 1e-7) / (tp + self.alpha * fn + (1 - self.alpha) * fp + 1e-7)
+        return K.pow(1 - tversky, self.gamma)
 
 def load_medsam_model(checkpoint_path):
     global medsam_model
@@ -60,15 +127,47 @@ def load_medsam_model(checkpoint_path):
         state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
         medsam_model = build_sam_vit_b()
         medsam_model.load_state_dict(state_dict)
+        medsam_model = torch.quantization.quantize_dynamic(medsam_model, {torch.nn.Linear}, dtype=torch.qint8)
         medsam_model.to(device)
         medsam_model.eval()
-        logger.info(f"Loaded MedSAM model from {checkpoint_path}")
+        logger.info(f"Loaded and quantized MedSAM model from {checkpoint_path}")
     except FileNotFoundError:
         logger.error(f"Checkpoint file {checkpoint_path} not found")
         medsam_model = None
     except Exception as e:
         logger.error(f"Failed to load MedSAM model: {str(e)}")
         medsam_model = None
+
+def fine_tune_medsam(X_train, y_train, checkpoint_path, epochs=5):
+    global medsam_model
+    if medsam_model is None:
+        load_medsam_model(checkpoint_path)
+    optimizer = torch.optim.Adam(medsam_model.parameters(), lr=1e-5)
+    criterion = torch.nn.BCEWithLogitsLoss()
+    medsam_model.train()
+    for epoch in range(epochs):
+        for img, mask in zip(X_train, y_train):
+            img = cv2.resize(img, (1024, 1024))
+            img_tensor = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+            img_tensor = img_tensor.unsqueeze(0).to(device)
+            mask = cv2.resize(mask, (256, 256), interpolation=cv2.INTER_NEAREST)
+            mask_tensor = torch.from_numpy(mask).float().unsqueeze(0).to(device)
+            optimizer.zero_grad()
+            image_embedding = medsam_model.image_encoder(img_tensor)
+            sparse_embeddings, dense_embeddings = medsam_model.prompt_encoder(points=None, boxes=None, masks=None)
+            outputs, _ = medsam_model.mask_decoder(
+                image_embeddings=image_embedding,
+                image_pe=medsam_model.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=False
+            )
+            loss = criterion(outputs, mask_tensor)
+            loss.backward()
+            optimizer.step()
+        logger.info(f"MedSAM Fine-Tuning Epoch {epoch+1}, Loss: {loss.item()}")
+    torch.save(medsam_model.state_dict(), checkpoint_path.replace('.pth', '_finetuned.pth'))
+    medsam_model.eval()
 
 class VisualizationCallback(Callback):
     def __init__(self, X_val_resized, y_val_resized, save_dir="val_predictions"):
@@ -100,96 +199,95 @@ class VisualizationCallback(Callback):
         plt.close('all')
         gc.collect()
 
+def advanced_augmentation(is_training=True):
+    transforms = [
+        A.Resize(128, 128),
+        A.Rotate(limit=40, p=0.7),
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1, p=0.5),
+        A.GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+        A.Cutout(num_holes=8, max_h_size=16, max_w_size=16, p=0.3) if is_training else A.NoOp(),
+    ]
+    return A.Compose(transforms, additional_targets={'mask': 'mask'})
+
+def generate_synthetic_wounds(num_samples=100, output_dir="synthetic_wounds"):
+    os.makedirs(output_dir, exist_ok=True)
+    pipe = StableDiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2-1").to(device)
+    for i in range(num_samples):
+        image = pipe("A realistic medical wound on skin, high detail", num_inference_steps=50).images[0]
+        mask = np.zeros((image.size[1], image.size[0]), dtype=np.uint8)  # Placeholder mask
+        image.save(os.path.join(output_dir, f"synthetic_{i}.png"))
+        cv2.imwrite(os.path.join(output_dir, f"synthetic_mask_{i}.png"), mask)
+    return output_dir
+
+def clean_data(images, masks):
+    features = np.array([img.mean() for img in images]).reshape(-1, 1)
+    clf = IsolationForest(contamination=0.1, random_state=42)
+    outliers = clf.fit_predict(features)
+    valid_indices = np.where(outliers == 1)[0]
+    return images[valid_indices], masks[valid_indices]
+
+def active_learning(model, X_unlabeled, num_samples=10):
+    preds = model.predict(X_unlabeled, verbose=0)
+    entropy = -np.sum(preds * np.log(preds + 1e-10), axis=-1).mean(axis=(1, 2))
+    top_indices = np.argsort(entropy)[-num_samples:]
+    return X_unlabeled[top_indices]
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-def check_image_quality(image, api_key):
+def check_image_quality(image):
+    if llava_model is None or llava_processor is None:
+        logger.error("LLaVA model not loaded")
+        return {"is_valid": False, "message": "LLaVA model not loaded"}
     try:
-        client = OpenAI(api_key=api_key)
         img_uint8 = (image * 255).astype(np.uint8)
-        _, buffer = cv2.imencode('.png', cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        img_base64 = base64.b64encode(buffer).decode('utf-8')
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Is this medical wound image clear, well-lit, and suitable for analysis? If not, suggest improvements."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                    ]
-                }
-            ],
-            max_tokens=150
-        )
-        message = response.choices[0].message.content
+        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
+        prompt = "Is this medical wound image clear, well-lit, and suitable for analysis? If not, suggest improvements."
+        inputs = llava_processor(text=prompt, images=img_pil, return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = llava_model.generate(**inputs, max_length=150)
+        message = llava_processor.decode(outputs[0], skip_special_tokens=True)
         is_valid = "clear" in message.lower() and "suitable" in message.lower()
         return {"is_valid": is_valid, "message": message}
-    except RateLimitError:
-        logger.error("OpenAI API rate limit exceeded")
-        return {"is_valid": False, "message": "Rate limit exceeded"}
-    except AuthenticationError:
-        logger.error("OpenAI API authentication failed")
-        return {"is_valid": False, "message": "Authentication failed"}
-    except APIError as e:
-        logger.error(f"OpenAI API error: {str(e)}")
-        return {"is_valid": False, "message": f"API error: {str(e)}"}
     except Exception as e:
         logger.error(f"Image quality check failed: {str(e)}")
         return {"is_valid": False, "message": f"Error in image quality check: {str(e)}"}
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-def validate_segmentation(image, pred_mask, api_key):
+def validate_segmentation(image, pred_mask):
+    if llava_model is None or llava_processor is None:
+        logger.error("LLaVA model not loaded")
+        return {"is_valid": False, "message": "LLaVA model not loaded"}
     try:
-        client = OpenAI(api_key=api_key)
         img_uint8 = (image * 255).astype(np.uint8)
-        _, img_buffer = cv2.imencode('.png', cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        img_base64 = base64.b64encode(img_buffer).decode('utf-8')
+        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
         mask_uint8 = (pred_mask * 255).astype(np.uint8)
-        _, mask_buffer = cv2.imencode('.png', mask_uint8)
-        mask_base64 = base64.b64encode(mask_buffer).decode('utf-8')
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "This is a wound image and its AI-generated segmentation mask (white = wound, black = background). Does the mask accurately outline the wound? If not, describe any issues and suggest improvements."
-                        },
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{mask_base64}"}}
-                    ]
-                }
-            ],
-            max_tokens=200
+        mask_pil = Image.fromarray(mask_uint8)
+        prompt = (
+            "This is a wound image and its AI-generated segmentation mask (white = wound, black = background). "
+            "Does the mask accurately outline the wound? If not, describe any issues and suggest improvements."
         )
-        message = response.choices[0].message.content
+        inputs = llava_processor(text=prompt, images=[img_pil, mask_pil], return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = llava_model.generate(**inputs, max_length=200)
+        message = llava_processor.decode(outputs[0], skip_special_tokens=True)
         is_valid = "accurate" in message.lower() or "correct" in message.lower()
         return {"is_valid": is_valid, "message": message}
-    except RateLimitError:
-        logger.error("OpenAI API rate limit exceeded")
-        return {"is_valid": False, "message": "Rate limit exceeded"}
-    except AuthenticationError:
-        logger.error("OpenAI API authentication failed")
-        return {"is_valid": False, "message": "Authentication failed"}
-    except APIError as e:
-        logger.error(f"OpenAI API error: {str(e)}")
-        return {"is_valid": False, "message": f"API error: {str(e)}"}
     except Exception as e:
         logger.error(f"Segmentation validation failed: {str(e)}")
         return {"is_valid": False, "message": f"Error in segmentation validation: {str(e)}"}
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-def generate_clinical_report(image, pred_mask, severity, healing_potential, validation_result, api_key, output_dir):
+def generate_clinical_report(image, pred_mask, severity, healing_potential, validation_result, output_dir):
     os.makedirs(output_dir, exist_ok=True)
+    if llava_model is None or llava_processor is None:
+        logger.error("LLaVA model not loaded")
+        return None
     try:
-        client = OpenAI(api_key=api_key)
         img_uint8 = (image * 255).astype(np.uint8)
-        _, img_buffer = cv2.imencode('.png', cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        img_base64 = base64.b64encode(img_buffer).decode('utf-8')
+        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
         mask_uint8 = (pred_mask * 255).astype(np.uint8)
-        _, mask_buffer = cv2.imencode('.png', mask_uint8)
-        mask_base64 = base64.b64encode(mask_buffer).decode('utf-8')
+        mask_pil = Image.fromarray(mask_uint8)
         prompt = f"""
         Generate a clinical wound assessment report based on:
         - Wound image and segmentation mask (white = wound, black = background).
@@ -202,21 +300,10 @@ def generate_clinical_report(image, pred_mask, severity, healing_potential, vali
         - Patient instructions.
         Format as a concise medical report.
         """
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{mask_base64}"}}
-                    ]
-                }
-            ],
-            max_tokens=500
-        )
-        report_text = response.choices[0].message.content
+        inputs = llava_processor(text=prompt, images=[img_pil, mask_pil], return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = llava_model.generate(**inputs, max_length=500)
+        report_text = llava_processor.decode(outputs[0], skip_special_tokens=True)
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", "B", 16)
@@ -232,37 +319,188 @@ def generate_clinical_report(image, pred_mask, severity, healing_potential, vali
         logger.error(f"Report generation failed: {str(e)}")
         return None
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def predict_healing_potential(mask, image, patient_metadata=None):
+    wound_area = np.sum(mask > 0)
+    if wound_area < 5000:
+        severity = "Mild"
+        healing_potential = "High (80%)"
+    elif wound_area < 15000:
+        severity = "Moderate"
+        healing_potential = "Moderate (50%)"
+    else:
+        severity = "Severe"
+        healing_potential = "Low (20%)"
+    if llava_model is None or llava_processor is None:
+        logger.warning("LLaVA model not loaded, using default severity and healing potential")
+        return severity, healing_potential
+    try:
+        img_uint8 = (image * 255).astype(np.uint8)
+        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
+        mask_uint8 = (mask * 255).astype(np.uint8)
+        mask_pil = Image.fromarray(mask_uint8)
+        prompt = f"""
+        Analyze this wound image and its segmentation mask (white = wound, black = background).
+        - Estimate wound severity (Mild, Moderate, Severe).
+        - Predict healing potential (e.g., High, Moderate, Low with percentage).
+        - Consider wound appearance (color, exudate, necrosis) and area ({wound_area} pixels).
+        """
+        if patient_metadata:
+            prompt += f"Patient metadata: {patient_metadata}"
+        inputs = llava_processor(text=prompt, images=[img_pil, mask_pil], return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = llava_model.generate(**inputs, max_length=200)
+        message = llava_processor.decode(outputs[0], skip_special_tokens=True)
+        if "Severe" in message:
+            severity = "Severe"
+        elif "Moderate" in message:
+            severity = "Moderate"
+        else:
+            severity = "Mild"
+        healing_potential = message.split("healing potential")[-1].strip()[:50] if "healing potential" in message else healing_potential
+        return severity, healing_potential
+    except Exception as e:
+        logger.error(f"Healing potential prediction failed: {str(e)}")
+        return severity, healing_potential
+
+def load_data(image_dir, mask_dir=None, img_size=(128, 128), is_training=True):
+    logger.info(f"Loading data from {image_dir}, is_training={is_training}")
+    images, masks, original_images = [], [], []
+    if not os.path.exists(image_dir):
+        logger.error(f"Image directory {image_dir} does not exist")
+        return np.array([]), np.array([]), []
+
+    image_files = os.listdir(image_dir)
+    for img_name in image_files:
+        img_path = os.path.join(image_dir, img_name)
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        original_images.append(img.copy())
+        mask_path = os.path.join(mask_dir, img_name) if mask_dir else None
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE) if mask_path and os.path.exists(mask_path) else np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+        mask = (mask > 128).astype(np.uint8) if mask is not None else mask
+        images.append(img)
+        masks.append(mask)
+
+    images, masks = clean_data(np.array(images), np.array(masks))
+
+    if is_training:
+        synthetic_dir = generate_synthetic_wounds(num_samples=50)
+        synthetic_images, synthetic_masks, _ = load_data(synthetic_dir, synthetic_dir, img_size, is_training=False)
+        images = np.concatenate([images, synthetic_images], axis=0)
+        masks = np.concatenate([masks, synthetic_masks], axis=0)
+
+    transform = advanced_augmentation(is_training)
+    augmented_images, augmented_masks = [], []
+    for img, mask in zip(images, masks):
+        augmented = transform(image=img, mask=mask)
+        augmented_images.append(augmented['image'] / 255.0)
+        augmented_masks.append((augmented['mask'] > 0.5).astype(np.uint8))
+
+    return np.array(augmented_images), np.array(augmented_masks), original_images
+
+def load_data_with_medsam_fallback(image_dir, mask_dir=None, img_size=(128, 128), is_training=True, medsam_model_path=None):
+    images, masks, sources, original_images = [], [], [], []
+    if not os.path.exists(image_dir):
+        logger.error(f"Image directory {image_dir} does not exist")
+        return np.array([]), np.array([]), [], []
+    transform = advanced_augmentation(is_training)
+    image_files = os.listdir(image_dir)
+    for img_name in image_files:
+        img_path = os.path.join(image_dir, img_name)
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        original_images.append(img.copy())
+        mask_path = os.path.join(mask_dir, img_name) if mask_dir else None
+        if mask_path and os.path.exists(mask_path):
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask is not None:
+                mask = (mask > 128).astype(np.uint8)
+                source = "manual"
+            else:
+                if medsam_model_path and medsam_model:
+                    mask = medsam_segment(img, medsam_model_path)
+                    source = "medsam" if mask is not None else "dummy"
+                else:
+                    mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+                    source = "dummy"
+        else:
+            if medsam_model_path and medsam_model:
+                mask = medsam_segment(img, medsam_model_path)
+                source = "medsam" if mask is not None else "dummy"
+            else:
+                mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+                source = "dummy"
+        if mask is None:
+            mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+            source = "dummy"
+        augmented = transform(image=img, mask=mask)
+        images.append(augmented['image'] / 255.0)
+        masks.append((augmented['mask'] > 0.5).astype(np.uint8))
+        sources.append(source)
+    images, masks = clean_data(np.array(images), np.array(masks))
+    return np.array(images), np.array(masks), sources, original_images
+
+def build_unet(input_shape=(128, 128, 3), dropout_rate=0.1):
+    inputs = tf.keras.Input(shape=input_shape)
+    conv1 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(inputs)
+    conv1 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(conv1)
+    pool1 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv1)
+    conv2 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(pool1)
+    conv2 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(conv2)
+    pool2 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv2)
+    conv3 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(pool2)
+    conv3 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(conv3)
+    pool3 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv3)
+    conv4 = tf.keras.layers.Conv2D(512, 3, activation='relu', padding='same')(pool3)
+    conv4 = tf.keras.layers.Conv2D(512, 3, activation='relu', padding='same')(conv4)
+    drop4 = Dropout(dropout_rate)(conv4, training=True)
+    up5 = tf.keras.layers.UpSampling2D(size=(2, 2))(drop4)
+    up5 = tf.keras.layers.Concatenate()([up5, conv3])
+    conv5 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(up5)
+    conv5 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(conv5)
+    up6 = tf.keras.layers.UpSampling2D(size=(2, 2))(conv5)
+    up6 = tf.keras.layers.Concatenate()([up6, conv2])
+    conv6 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(up6)
+    conv6 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(conv6)
+    up7 = tf.keras.layers.UpSampling2D(size=(2, 2))(conv6)
+    up7 = tf.keras.layers.Concatenate()([up7, conv1])
+    conv7 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(up7)
+    conv7 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(conv7)
+    outputs = tf.keras.layers.Conv2D(1, 1, activation='sigmoid')(conv7)
+    return tf.keras.Model(inputs=inputs, outputs=outputs)
+
+def build_ensemble_unet(input_shape=(128, 128, 3)):
+    model1 = build_unet(input_shape)
+    model2 = sm.Unet('resnet34', input_shape=input_shape, classes=1, activation='sigmoid')
+    return [model1, model2]
+
+def create_dataset(X, y, batch_size, is_training=True):
+    dataset = tf.data.Dataset.from_tensor_slices((X, y))
+    if is_training:
+        dataset = dataset.shuffle(buffer_size=1000)
+    dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    return dataset
+
 def medsam_segment(image, medsam_model_path):
     global medsam_model
     if medsam_model is None:
         logger.error("MedSAM model not loaded")
         return None
     try:
-        if image.ndim != 3 or image.shape[-1] != 3:
-            logger.error("Input image must be RGB")
-            return None
-        if image.dtype != np.uint8:
-            image = (image * 255).astype(np.uint8)
         img_1024 = cv2.resize(image, (1024, 1024), interpolation=cv2.INTER_LINEAR)
         img_1024 = cv2.cvtColor(img_1024, cv2.COLOR_RGB2BGR)
         img_tensor = torch.from_numpy(img_1024).permute(2, 0, 1).float() / 255.0
         img_tensor = img_tensor.unsqueeze(0).to(device)
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(gray, 100, 200)
-        coords = np.where(edges > 0)
-        if len(coords[0]) > 0:
-            x_min, x_max = coords[1].min(), coords[1].max()
-            y_min, y_max = coords[0].min(), coords[0].max()
-            box = np.array([[x_min, y_min, x_max, y_max]])
-        else:
-            logger.warning("No edges detected, using default bounding box")
-            box = np.array([[256, 256, 768, 768]])
+        box = np.array([[256, 256, 768, 768]])  # Placeholder learned prompt
         box_tensor = torch.from_numpy(box).float().to(device)
         with torch.no_grad():
             image_embedding = medsam_model.image_encoder(img_tensor)
-            sparse_embeddings, dense_embeddings = medsam_model.prompt_encoder(
-                points=None, boxes=box_tensor, masks=None
-            )
+            sparse_embeddings, dense_embeddings = medsam_model.prompt_encoder(points=None, boxes=box_tensor, masks=None)
             low_res_masks, _ = medsam_model.mask_decoder(
                 image_embeddings=image_embedding,
                 image_pe=medsam_model.prompt_encoder.get_dense_pe(),
@@ -279,296 +517,133 @@ def medsam_segment(image, medsam_model_path):
         logger.error(f"Error in MedSAM segmentation: {str(e)}")
         return None
 
-def combine_masks(unet_mask, medsam_mask, method='union'):
-    if unet_mask.shape != medsam_mask.shape:
-        medsam_mask = cv2.resize(medsam_mask, (unet_mask.shape[1], unet_mask.shape[0]), interpolation=cv2.INTER_NEAREST)
-    unet_mask = (unet_mask > 0.5).astype(np.uint8)
-    medsam_mask = (medsam_mask > 0.5).astype(np.uint8)
-    if method == 'union':
-        return np.logical_or(unet_mask, medsam_mask).astype(np.uint8)
-    elif method == 'intersection':
-        return np.logical_and(unet_mask, medsam_mask).astype(np.uint8)
-    elif method == 'average':
-        hybrid_soft = 0.6 * unet_mask + 0.4 * medsam_mask
-        return (hybrid_soft > 0.5).astype(np.uint8)
-    else:
-        raise ValueError("Invalid combination method. Use 'union', 'intersection', or 'average'.")
-
-def load_data(image_dir, mask_dir=None, img_size=(128, 128), api_key=None, is_training=True):
-    logger.info(f"Loading data from {image_dir}, is_training={is_training}")
-    images, masks, original_images = [], [], []
-    if not os.path.exists(image_dir):
-        logger.error(f"Image directory {image_dir} does not exist")
-        return np.array([]), np.array([]), []
-    image_files = os.listdir(image_dir)
-    for img_name in image_files:
-        logger.debug(f"Processing image: {img_name}")
-        img_path = os.path.join(image_dir, img_name)
-        if not os.path.isfile(img_path):
-            logger.debug(f"Skipping {img_name}, not a file")
-            continue
-        img = cv2.imread(img_path)
-        if img is None:
-            logger.warning(f"Failed to load image {img_name}, skipping")
-            continue
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        original_images.append(img.copy())
-        if api_key:
-            quality_result = check_image_quality(img / 255.0, api_key)
-            if not quality_result['is_valid']:
-                logger.warning(f"Image {img_name} failed quality check: {quality_result['message']}")
-                continue
-        if mask_dir and os.path.exists(os.path.join(mask_dir, img_name)):
-            mask = cv2.imread(os.path.join(mask_dir, img_name), cv2.IMREAD_GRAYSCALE)
-            if mask is None:
-                logger.warning(f"Failed to load mask for {img_name}, using dummy mask")
-                mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
-            else:
-                mask = (mask > 128).astype(np.uint8)
-        else:
-            mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
-        images.append(img)
-        masks.append(mask)
-    if not images:
-        logger.error("No valid images loaded")
-        return np.array([]), np.array([]), []
-    logger.info(f"Loaded {len(images)} images")
-    transform = A.Compose([
-        A.Resize(img_size[0], img_size[1]),
-        A.Rotate(limit=40, p=0.5) if is_training else A.NoOp(),
-        A.HorizontalFlip(p=0.5) if is_training else A.NoOp(),
-        A.RandomBrightnessContrast(p=0.3) if is_training else A.NoOp(),
-    ])
-    augmented_images, augmented_masks = [], []
-    for img, mask in zip(images, masks):
-        logger.debug(f"Applying augmentations to image of shape {img.shape}")
-        augmented = transform(image=img, mask=mask)
-        augmented_images.append(augmented['image'] / 255.0)
-        augmented_masks.append((augmented['mask'] > 0.5).astype(np.uint8))
-    logger.info(f"Completed data processing for {len(augmented_images)} images")
-    return np.array(augmented_images), np.array(augmented_masks), original_images
-
-def load_data_with_medsam_fallback(image_dir, mask_dir=None, img_size=(128, 128), api_key=None, is_training=True, medsam_model_path=None):
-    from tqdm import tqdm
-    logger.info(f"Loading data with MedSAM fallback from {image_dir}")
-    images, masks, sources, original_images = [], [], [], []
-    if not os.path.exists(image_dir):
-        logger.error(f"Image directory {image_dir} does not exist")
-        return np.array([]), np.array([]), [], []
-    if medsam_model_path and medsam_model is None:
-        load_medsam_model(medsam_model_path)
-    for img_name in tqdm(os.listdir(image_dir)):
-        logger.debug(f"Processing image with MedSAM fallback: {img_name}")
-        img_path = os.path.join(image_dir, img_name)
-        if not os.path.isfile(img_path):
-            continue
-        img = cv2.imread(img_path)
-        if img is None:
-            logger.warning(f"Failed to load image {img_name}, skipping")
-            continue
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        original_images.append(img.copy())
-        if api_key:
-            quality_result = check_image_quality(img / 255.0, api_key)
-            if not quality_result['is_valid']:
-                logger.warning(f"Image {img_name} failed quality check: {quality_result['message']}")
-                continue
-        mask_path = os.path.join(mask_dir, img_name) if mask_dir else None
-        if mask_path and os.path.exists(mask_path):
-            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask is not None:
-                mask = (mask > 128).astype(np.uint8)
-                source = "manual"
-            else:
-                if medsam_model_path and medsam_model:
-                    mask = medsam_segment(img, medsam_model_path)
-                    source = "medsam" if mask is not None else "dummy"
-                else:
-                    logger.warning(f"No manual mask for {img_name} and MedSAM not available, using dummy mask")
-                    mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
-                    source = "dummy"
-        else:
-            if medsam_model_path and medsam_model:
-                mask = medsam_segment(img, medsam_model_path)
-                source = "medsam" if mask is not None else "dummy"
-            else:
-                logger.warning(f"No manual mask for {img_name} and MedSAM not available, using dummy mask")
-                mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
-                source = "dummy"
-        if mask is None:
-            logger.warning(f"Skipping {img_name} due to no valid mask")
-            continue
-        transform = A.Compose([
-            A.Resize(img_size[0], img_size[1]),
-            A.Rotate(limit=40, p=0.5) if is_training else A.NoOp(),
-            A.HorizontalFlip(p=0.5) if is_training else A.NoOp(),
-            A.RandomBrightnessContrast(p=0.3) if is_training else A.NoOp(),
-        ])
-        augmented = transform(image=img, mask=mask)
-        images.append(augmented['image'] / 255.0)
-        masks.append((augmented['mask'] > 0.5).astype(np.uint8))
-        sources.append(source)
-    if len(images) == 0 or len(masks) == 0 or len(original_images) == 0:
-        logger.error("No valid data loaded after processing")
-        return np.array([]), np.array([]), [], []
-    if len(sources) != len(images):
-        logger.warning(f"Mismatched sources length ({len(sources)} vs {len(images)}), padding with 'dummy'")
-        sources.extend(["dummy"] * (len(images) - len(sources)))
-    logger.info(f"Loaded {len(images)} images: {sources.count('manual')} manual, {sources.count('medsam')} MedSAM, {sources.count('dummy')} dummy")
-    return np.array(images), np.array(masks), sources, original_images
-
-def build_unet(input_shape=(128, 128, 3)):
-    inputs = tf.keras.Input(shape=input_shape)
-    conv1 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(inputs)
-    conv1 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(conv1)
-    pool1 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv1)
-    conv2 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(pool1)
-    conv2 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(conv2)
-    pool2 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv2)
-    conv3 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(pool2)
-    conv3 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(conv3)
-    pool3 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv3)
-    conv4 = tf.keras.layers.Conv2D(512, 3, activation='relu', padding='same')(pool3)
-    conv4 = tf.keras.layers.Conv2D(512, 3, activation='relu', padding='same')(conv4)
-    drop4 = tf.keras.layers.Dropout(0.5)(conv4)
-    up5 = tf.keras.layers.UpSampling2D(size=(2, 2))(drop4)
-    up5 = tf.keras.layers.Concatenate()([up5, conv3])
-    conv5 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(up5)
-    conv5 = tf.keras.layers.Conv2D(256, 3, activation='relu', padding='same')(conv5)
-    up6 = tf.keras.layers.UpSampling2D(size=(2, 2))(conv5)
-    up6 = tf.keras.layers.Concatenate()([up6, conv2])
-    conv6 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(up6)
-    conv6 = tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same')(conv6)
-    up7 = tf.keras.layers.UpSampling2D(size=(2, 2))(conv6)
-    up7 = tf.keras.layers.Concatenate()([up7, conv1])
-    conv7 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(up7)
-    conv7 = tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same')(conv7)
-    outputs = tf.keras.layers.Conv2D(1, 1, activation='sigmoid')(conv7)
-    return tf.keras.Model(inputs=inputs, outputs=outputs)
-
-def feature_extraction(img):
-    gray = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+def feature_extraction(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     canny = cv2.Canny(gray, 100, 200)
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=5)
-    sobelx = cv2.convertScaleAbs(sobelx)
-    sobely = cv2.convertScaleAbs(sobely)
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 3, 1), plt.imshow(canny, cmap='gray'), plt.title('Canny Edge')
-    plt.subplot(1, 3, 2), plt.imshow(sobelx, cmap='gray'), plt.title('Sobel X')
-    plt.subplot(1, 3, 3), plt.imshow(sobely, cmap='gray'), plt.title('Sobel Y')
-    plt.savefig(f'feature_extraction_{timestamp}.png', dpi=150)
-    plt.close('all')
-    return canny, sobelx, sobely
+    return canny / 255.0, sobelx / np.max(np.abs(sobelx)), sobely / np.max(np.abs(sobely))
 
-def create_dataset(images, masks, batch_size, is_training=True):
-    dataset = tf.data.Dataset.from_tensor_slices((images, masks))
-    if is_training:
-        dataset = dataset.shuffle(buffer_size=1000)
-    dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    return dataset
+def explainable_ai(model, image):
+    model_grad = tf.keras.Model(model.inputs, [model.get_layer(index=-2).output, model.output])
+    with tf.GradientTape() as tape:
+        image_tensor = tf.expand_dims(image, axis=0)
+        tape.watch(image_tensor)
+        conv_outputs, predictions = model_grad(image_tensor)
+        loss = predictions[:, :, :, 0]
+    grads = tape.gradient(loss, conv_outputs)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+    conv_outputs = conv_outputs[0]
+    heatmap = tf.reduce_mean(tf.multiply(conv_outputs, pooled_grads), axis=-1)
+    heatmap = np.maximum(heatmap, 0) / np.max(heatmap)
+    return cv2.resize(heatmap, (image.shape[1], image.shape[0]))
+
+def explain_with_shap(model, image):
+    explainer = shap.DeepExplainer(model, np.expand_dims(image, axis=0))
+    shap_values = explainer.shap_values(np.expand_dims(image, axis=0))
+    return shap_values
+
+def combine_masks(mask1, mask2, method='union'):
+    if method == 'union':
+        return np.logical_or(mask1, mask2).astype(np.uint8)
+    elif method == 'intersection':
+        return np.logical_and(mask1, mask2).astype(np.uint8)
+    elif method == 'average':
+        combined = (mask1.astype(float) * 0.6 + mask2.astype(float) * 0.4)
+        return (combined > 0.5).astype(np.uint8)
+    else:
+        raise ValueError(f"Unknown combination method: {method}")
+
+def test_time_augmentation(model, image):
+    augmentations = [
+        lambda x: x,
+        lambda x: np.fliplr(x),
+        lambda x: np.flipud(x),
+        lambda x: A.Rotate(limit=90, p=1)(image=x)['image']
+    ]
+    predictions = []
+    for aug in augmentations:
+        aug_img = aug(image)
+        pred = model.predict(np.expand_dims(aug_img, axis=0), verbose=0)
+        if aug == augmentations[1]:
+            pred = np.fliplr(pred)
+        elif aug == augmentations[2]:
+            pred = np.flipud(pred)
+        elif aug == augmentations[3]:
+            pred = A.Rotate(limit=-90, p=1)(image=pred[0])['image']
+            pred = np.expand_dims(pred, axis=0)
+        predictions.append(pred)
+    return np.mean(predictions, axis=0)
+
+def estimate_uncertainty(model, image, num_samples=10):
+    predictions = []
+    for _ in range(num_samples):
+        pred = model.predict(np.expand_dims(image, axis=0), verbose=0)
+        predictions.append(pred)
+    predictions = np.array(predictions)
+    mean_pred = np.mean(predictions, axis=0)
+    uncertainty = np.var(predictions, axis=0)
+    return mean_pred, uncertainty
+
+def adversarial_training(model, X_train, y_train, epsilon=0.1):
+    X_adv = X_train + epsilon * np.sign(np.random.randn(*X_train.shape))
+    X_adv = np.clip(X_adv, 0, 1)
+    train_dataset = create_dataset(np.concatenate([X_train, X_adv]), np.concatenate([y_train, y_train]), batch_size=4)
+    model.fit(train_dataset, epochs=5, callbacks=[TqdmCallback(verbose=1)])
+    return model
+
+def calibrate_model(model, X_val, y_val):
+    y_pred = model.predict(X_val, verbose=0).flatten()
+    y_true = y_val.flatten()
+    calibrator = CalibratedClassifierCV(base_estimator=None, method='sigmoid', cv='prefit')
+    calibrator.fit(y_pred.reshape(-1, 1), y_true)
+    return calibrator
+
+def visualize_results(img, true_mask, pred_mask, orig_img, heatmap, canny, idx, output_dir, medsam_pred=None, validation_result=None, severity=None, healing_potential=None):
+    val_dir = os.path.join(output_dir, "val_predictions")
+    os.makedirs(val_dir, exist_ok=True)
+    plt.figure(figsize=(20, 12))
+    plt.subplot(3, 4, 1), plt.imshow(img), plt.title('Input Image'), plt.axis('off')
+    plt.subplot(3, 4, 2), plt.imshow(true_mask, cmap='gray'), plt.title('True Mask'), plt.axis('off')
+    plt.subplot(3, 4, 3), plt.imshow(pred_mask, cmap='gray'), plt.title('Hybrid Predicted Mask'), plt.axis('off')
+    plt.subplot(3, 4, 4), plt.imshow(orig_img), plt.title('Original Image'), plt.axis('off')
+    plt.subplot(3, 4, 5), plt.imshow(heatmap, cmap='jet'), plt.title('Grad-CAM Heatmap'), plt.axis('off')
+    plt.subplot(3, 4, 6), plt.imshow(canny, cmap='gray'), plt.title('Canny Edges'), plt.axis('off')
+    if medsam_pred is not None:
+        plt.subplot(3, 4, 8), plt.imshow(medsam_pred, cmap='gray'), plt.title('MedSAM Predicted Mask'), plt.axis('off')
+    if validation_result:
+        plt.subplot(3, 4, 9), plt.text(0.5, 0.5, validation_result['message'][:200], wrap=True, ha='center', va='center'), plt.title('Validation Result'), plt.axis('off')
+    if severity and healing_potential:
+        plt.subplot(3, 4, 10), plt.text(0.5, 0.5, f"Severity: {severity}\nHealing: {healing_potential}", ha='center', va='center'), plt.title('Assessment'), plt.axis('off')
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    plt.savefig(os.path.join(val_dir, f'result_{idx}_{timestamp}.png'), dpi=150)
+    plt.close('all')
 
 def train_model(X_train, y_train, X_val, y_val, img_size=(128, 128), batch_size=4, epochs=50, model_save_path=None, pretrained_model_path=None):
-    model = build_unet(input_shape=(128, 128, 3))
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
-    model.compile(optimizer=optimizer,
-                  loss=sm.losses.BinaryFocalLoss() + sm.losses.DiceLoss(),
-                  metrics=[sm.metrics.IOUScore()])
-    if pretrained_model_path:
-        model.load_weights(pretrained_model_path)
-        logger.info(f"Loaded pre-trained model from {pretrained_model_path}")
-    if len(X_train) == 0 or len(X_val) == 0:
-        logger.error("Training or validation data is empty. Cannot proceed with training.")
-        return model, None
-    X_train_resized = tf.image.resize(X_train, [128, 128], method='bilinear').numpy()
-    y_train_resized = tf.image.resize(y_train, [128, 128], method='nearest').numpy()
-    X_val_resized = tf.image.resize(X_val, [128, 128], method='bilinear').numpy()
-    y_val_resized = tf.image.resize(y_val, [128, 128], method='nearest').numpy()
-    train_dataset = create_dataset(X_train_resized, y_train_resized, batch_size, is_training=True)
-    val_dataset = create_dataset(X_val_resized, y_val_resized, batch_size, is_training=False)
-    callbacks = [
-        EarlyStopping(patience=10, restore_best_weights=True),
-        ModelCheckpoint(model_save_path, save_best_only=True),
-        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5),
-        VisualizationCallback(X_val_resized, y_val_resized),
-        TqdmCallback(verbose=1)
-    ]
-    if model_save_path:
-        with open(os.path.join(os.path.dirname(model_save_path), 'model_summary.txt'), 'w') as f:
-            model.summary(print_fn=lambda x: f.write(x + '\n'))
-    history = model.fit(
-        train_dataset,
-        validation_data=val_dataset,
-        epochs=epochs,
-        callbacks=callbacks
-    )
-    return model, history
-
-def explainable_ai(model, img):
-    logger.info("Generating Grad-CAM visualization")
-    img_tensor = tf.image.resize(img, (128, 128))[None, ...]
-    prediction = model(img_tensor)
-    heatmap = tf.squeeze(prediction, axis=[0, -1])
-    heatmap = tf.maximum(heatmap, 0) / tf.reduce_max(heatmap)
-    return heatmap
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-def predict_healing_potential(mask, image, api_key=None, patient_metadata=None):
-    wound_area = np.sum(mask > 0)
-    if wound_area < 5000:
-        severity = "Mild"
-        healing_potential = "High (80%)"
-    elif wound_area < 15000:
-        severity = "Moderate"
-        healing_potential = "Moderate (50%)"
-    else:
-        severity = "Severe"
-        healing_potential = "Low (20%)"
-    if api_key:
-        client = OpenAI(api_key=api_key)
-        img_uint8 = (image * 255).astype(np.uint8)
-        _, img_buffer = cv2.imencode('.png', cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        img_base64 = base64.b64encode(img_buffer).decode('utf-8')
-        mask_uint8 = (mask * 255).astype(np.uint8)
-        _, mask_buffer = cv2.imencode('.png', mask_uint8)
-        mask_base64 = base64.b64encode(mask_buffer).decode('utf-8')
-        prompt = f"""
-        Analyze this wound image and its segmentation mask (white = wound, black = background).
-        - Estimate wound severity (Mild, Moderate, Severe).
-        - Predict healing potential (e.g., High, Moderate, Low with percentage).
-        - Consider wound appearance (color, exudate, necrosis) and area ({wound_area} pixels).
-        """
-        if patient_metadata:
-            prompt += f"Patient metadata: {patient_metadata}"
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{mask_base64}"}}
-                    ]
-                }
-            ],
-            max_tokens=200
-        )
-        message = response.choices[0].message.content
-        if "Severe" in message:
-            severity = "Severe"
-        elif "Moderate" in message:
-            severity = "Moderate"
-        else:
-            severity = "Mild"
-        healing_potential = message.split("healing potential")[-1].strip()[:50]
-    return severity, healing_potential
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    models = []
+    for fold, (train_idx, val_idx) in enumerate(kf.split(X_train)):
+        X_train_fold, y_train_fold = X_train[train_idx], y_train[train_idx]
+        X_val_fold, y_val_fold = X_train[val_idx], y_train[val_idx]
+        model = build_unet(input_shape=(128, 128, 3))
+        optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
+        model.compile(optimizer=optimizer, loss=FocalTverskyLoss(), metrics=[sm.metrics.IOUScore()])
+        if pretrained_model_path:
+            model.load_weights(pretrained_model_path)
+        train_dataset = create_dataset(X_train_fold, y_train_fold, batch_size, is_training=True)
+        val_dataset = create_dataset(X_val_fold, y_val_fold, batch_size, is_training=False)
+        callbacks = [
+            EarlyStopping(patience=10, restore_best_weights=True),
+            ModelCheckpoint(f"{model_save_path}_fold{fold}", save_best_only=True),
+            ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5),
+            VisualizationCallback(X_val_fold, y_val_fold),
+            TqdmCallback(verbose=1)
+        ]
+        model.fit(train_dataset, validation_data=val_dataset, epochs=epochs, callbacks=callbacks)
+        models.append(model)
+    return models, None
 
 def evaluate_model(model, X_test, y_test):
-    if len(X_test) == 0 or len(y_test) == 0:
-        logger.error("Test data is empty. Cannot evaluate model.")
-        return
     X_test_resized = tf.image.resize(X_test, [128, 128], method='bilinear').numpy()
     y_test_resized = tf.image.resize(y_test, [128, 128], method='nearest').numpy()
     y_pred = model.predict(X_test_resized, verbose=0)
@@ -579,43 +654,13 @@ def evaluate_model(model, X_test, y_test):
     iou = sm.metrics.IOUScore()(y_test_resized, y_pred_binary)
     logger.info(f"Test Metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}, IoU: {iou:.4f}")
 
-def visualize_results(img, true_mask, pred_mask, orig_img, heatmap, canny, idx, output_dir, medsam_pred=None, validation_result=None, severity=None, healing_potential=None):
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    plt.figure(figsize=(10, 10))
-    plt.subplot(3, 4, 1), plt.imshow(orig_img), plt.title('Original Image')
-    true_mask_squeezed = true_mask.squeeze() if true_mask.ndim > 2 else true_mask
-    plt.subplot(3, 4, 2), plt.imshow(true_mask_squeezed, cmap='gray'), plt.title('True Mask')
-    plt.subplot(3, 4, 3), plt.imshow(pred_mask, cmap='gray'), plt.title('Hybrid Predicted Mask')
-    plt.subplot(3, 4, 4)
-    contours, _ = cv2.findContours((pred_mask * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contour_img = (orig_img * 255).astype(np.uint8).copy()
-    cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 2)
-    plt.imshow(contour_img), plt.title('Wound Boundary')
-    plt.subplot(3, 4, 5), plt.imshow(canny, cmap='gray'), plt.title('Canny Edge')
-    plt.subplot(3, 4, 6), plt.imshow(heatmap, cmap='jet'), plt.title('Grad-CAM Heatmap')
-    plt.subplot(3, 4, 7)
-    plt.text(0.1, 0.8, f"Severity: {severity}", fontsize=10)
-    plt.text(0.1, 0.6, f"Healing Potential: {healing_potential}", fontsize=10)
-    plt.text(0.1, 0.4, f"O3 Validation: {validation_result['message'][:100] if validation_result else 'N/A'}", fontsize=8)
-    plt.axis('off'), plt.title('AI Prediction')
-    if medsam_pred is not None:
-        plt.subplot(3, 4, 8), plt.imshow(medsam_pred, cmap='gray'), plt.title('MedSAM Predicted Mask')
-    plt.savefig(os.path.join(output_dir, f'segmentation_results_{timestamp}_{idx}.png'), dpi=150)
-    plt.close('all')
-
-def evaluate_and_visualize(model, X_test, y_test, original_images, api_key=None, use_medsam=False,
-                          medsam_model_path=None, output_dir="output", hybrid_mode=False, combination_method='union', patient_metadata=None):
-    logger.info("Starting evaluation and visualization")
-    if len(X_test) == 0:
-        logger.error("No test images available for evaluation")
-        return
-    if model is None and not hybrid_mode:
-        logger.error("Model is None and hybrid mode is disabled. Cannot proceed with evaluation.")
-        return
+def evaluate_and_visualize(models, X_test, y_test, original_images, use_medsam=False, medsam_model_path=None, output_dir="output", hybrid_mode=False, combination_method='union', patient_metadata=None):
     val_dir = os.path.join(output_dir, "val_predictions")
     report_dir = os.path.join(output_dir, "reports")
     os.makedirs(val_dir, exist_ok=True)
     os.makedirs(report_dir, exist_ok=True)
+    error_log = []
+    calibrator = calibrate_model(models[0], X_test, y_test)
     batch_size = 4
     for start_idx in range(0, len(X_test), batch_size):
         end_idx = min(start_idx + batch_size, len(X_test))
@@ -623,16 +668,20 @@ def evaluate_and_visualize(model, X_test, y_test, original_images, api_key=None,
         batch_true_masks = y_test[start_idx:end_idx]
         batch_original_imgs = original_images[start_idx:end_idx]
         batch_imgs_resized = tf.image.resize(batch_imgs, [128, 128], method='bilinear').numpy()
-        batch_preds = model.predict(batch_imgs_resized, verbose=0) if model is not None else np.zeros_like(batch_true_masks)
-        if len(batch_preds.shape) == 3:
-            batch_preds = np.expand_dims(batch_preds, axis=-1)
-        batch_preds = tf.image.resize(batch_preds, [X_test.shape[1], X_test.shape[2]], method='nearest').numpy()
+        batch_preds = []
+        for model in models:
+            batch_preds.append(test_time_augmentation(model, batch_imgs_resized))
+        batch_preds = np.mean(batch_preds, axis=0)
+        batch_preds_calibrated = calibrator.predict_proba(batch_preds.flatten().reshape(-1, 1))[:, 1].reshape(batch_preds.shape)
+        batch_preds = tf.image.resize(batch_preds_calibrated, [X_test.shape[1], X_test.shape[2]], method='nearest').numpy()
         for i, (img, true_mask, pred, orig_img) in enumerate(zip(batch_imgs, batch_true_masks, batch_preds, batch_original_imgs)):
             idx = start_idx + i
-            logger.info(f"Processing image {idx + 1}/{len(X_test)}")
             pred_mask = (pred > 0.5).astype(np.uint8)
             if pred_mask.shape[-1] == 1:
                 pred_mask = pred_mask.squeeze()
+            iou = sm.metrics.IOUScore()(np.expand_dims(true_mask, 0), np.expand_dims(pred_mask, 0))
+            if iou < 0.5:
+                error_log.append({"idx": idx, "iou": float(iou), "image": f"image_{idx}"})
             medsam_pred = None
             if use_medsam and medsam_model_path:
                 medsam_pred = medsam_segment(orig_img, medsam_model_path)
@@ -641,25 +690,16 @@ def evaluate_and_visualize(model, X_test, y_test, original_images, api_key=None,
             else:
                 hybrid_mask = pred_mask
             canny, sobelx, sobely = feature_extraction(orig_img)
-            heatmap = explainable_ai(model, img) if model is not None else np.zeros_like(hybrid_mask)
-            severity, healing_potential = predict_healing_potential(hybrid_mask, orig_img, api_key, patient_metadata)
-            validation_result = {"is_valid": True, "message": "O3 validation skipped (no API key)"}
-            if api_key:
-                validation_result = validate_segmentation(orig_img, hybrid_mask, api_key)
-            report_path = None
-            if api_key:
-                report_path = generate_clinical_report(
-                    orig_img, hybrid_mask, severity, healing_potential,
-                    validation_result, api_key, report_dir
-                )
-                if report_path:
-                    logger.info(f"Clinical report saved at: {report_path}")
-            visualize_results(
-                img, true_mask, hybrid_mask, orig_img, heatmap, canny, idx, output_dir,
-                medsam_pred=medsam_pred, validation_result=validation_result,
-                severity=severity, healing_potential=healing_potential
-            )
+            heatmap = explainable_ai(models[0], img) if models else np.zeros_like(hybrid_mask)
+            shap_values = explain_with_shap(models[0], img)
+            severity, healing_potential = predict_healing_potential(hybrid_mask, orig_img, patient_metadata)
+            validation_result = validate_segmentation(orig_img, hybrid_mask)
+            report_path = generate_clinical_report(orig_img, hybrid_mask, severity, healing_potential, validation_result, report_dir)
+            mean_pred, uncertainty = estimate_uncertainty(models[0], img)
+            visualize_results(img, true_mask, hybrid_mask, orig_img, heatmap, canny, idx, output_dir, medsam_pred, validation_result, severity, healing_potential)
             gc.collect()
+    with open(os.path.join(output_dir, "error_log.json"), "w") as f:
+        json.dump(error_log, f)
 
 def main():
     parser = argparse.ArgumentParser(description='Train or evaluate wound segmentation model.')
@@ -670,7 +710,6 @@ def main():
     parser.add_argument('--img_size', type=int, default=128, help='Image size (square)')
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training')
     parser.add_argument('--epochs', type=int, default=50, help='Number of training epochs')
-    parser.add_argument('--openai_api_key', help='OpenAI API key for O3 integration')
     parser.add_argument('--use_medsam', action='store_true', help='Use MedSAM for segmentation during evaluation')
     parser.add_argument('--use_medsam_fallback', action='store_true', help='Use MedSAM to generate masks for images without manual masks')
     parser.add_argument('--hybrid_mode', action='store_true', help='Combine U-Net and MedSAM masks')
@@ -699,26 +738,24 @@ def main():
     import json
     patient_metadata = json.loads(args.patient_metadata)
     
-    if args.openai_api_key:
-        logger.info("OpenAI API key provided, enabling O3 integration")
+    if llava_model is None or llava_processor is None:
+        logger.warning("LLaVA model not loaded, some functionalities may be limited")
+    
     if args.use_medsam and args.medsam_model_path:
         load_medsam_model(args.medsam_model_path)
-    if medsam_model is None:
-        logger.warning("MedSAM model failed to load, disabling MedSAM")
-        args.use_medsam = False
-    if args.use_medsam_fallback and not args.medsam_model_path:
-        logger.warning("MedSAM fallback requested but no model path provided, disabling fallback")
-        args.use_medsam_fallback = False
+        if args.train_image_dir and args.train_mask_dir:
+            X_train, y_train, _ = load_data(args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size), is_training=True)
+            fine_tune_medsam(X_train, y_train, args.medsam_model_path)
     
     if args.use_medsam_fallback:
         X_test, y_test, sources_test, original_test_images = load_data_with_medsam_fallback(
             args.test_image_dir, args.test_mask_dir, img_size=(args.img_size, args.img_size),
-            api_key=args.openai_api_key, is_training=False, medsam_model_path=args.medsam_model_path
+            is_training=False, medsam_model_path=args.medsam_model_path
         )
     else:
         X_test, y_test, original_test_images = load_data(
             args.test_image_dir, args.test_mask_dir, img_size=(args.img_size, args.img_size),
-            api_key=args.openai_api_key, is_training=False
+            is_training=False
         )
         sources_test = []
     
@@ -738,16 +775,7 @@ def main():
     else:
         if not args.train_image_dir or not args.train_mask_dir:
             raise ValueError("Training directories required unless pre-trained model provided")
-        if args.use_medsam_fallback:
-            X_train, y_train, sources_train, _ = load_data_with_medsam_fallback(
-                args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size),
-                api_key=args.openai_api_key, is_training=True, medsam_model_path=args.medsam_model_path
-            )
-        else:
-            X_train, y_train, _ = load_data(
-                args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size),
-                api_key=args.openai_api_key, is_training=True
-            )
+        X_train, y_train, _ = load_data(args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size), is_training=True)
         if len(X_train) == 0:
             logger.error("No training images loaded. Exiting.")
             sys.exit(1)
@@ -757,20 +785,19 @@ def main():
     
     logger.info(f"Training set: {len(X_train)}, Validation set: {len(X_val)}, Test set: {len(X_test)}")
     
-    model, history = train_model(
+    models, history = train_model(
         X_train, y_train, X_val, y_val,
         img_size=(args.img_size, args.img_size), batch_size=args.batch_size,
         epochs=args.epochs, model_save_path=args.model_save_path,
         pretrained_model_path=args.pretrained_model_path
     )
     
-    if not args.pretrained_model_path:
-        model.summary()
+    for model in models:
+        model = adversarial_training(model, X_train, y_train)
     
-    evaluate_model(model, X_test, y_test)
+    evaluate_model(models[0], X_test, y_test)
     evaluate_and_visualize(
-        model, X_test, y_test, original_test_images,
-        api_key=args.openai_api_key,
+        models, X_test, y_test, original_test_images,
         use_medsam=args.use_medsam,
         medsam_model_path=args.medsam_model_path,
         output_dir=args.output_dir,
