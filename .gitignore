@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+/env/
+*.png
+/tfenv/
+/utils/
+/MedSAM/
+/wound_seg_env/
+/venv/
+/wound_env/
+/output/
+/offline_results/
+/wounds/
