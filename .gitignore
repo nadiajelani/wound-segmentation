@@ -6,6 +6,7 @@ __pycache__/
 /utils/
 /MedSAM/
 /wound_seg_env/
+/wound_seg_env/*
 /venv/
 /wound_env/
 /output/
