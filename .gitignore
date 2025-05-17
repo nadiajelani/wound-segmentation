@@ -12,3 +12,4 @@ __pycache__/
 /output/
 /offline_results/
 /wounds/
+*.pth
