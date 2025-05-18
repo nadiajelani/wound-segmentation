@@ -24,7 +24,6 @@ def generate_patient_report(image, pred_mask, patient_info, severity, healing_po
     - Severity: {severity}
     - Healing Potential: {healing_potential}
     """
-
     # Simplified instructions
     patient_instructions = """
     What to Do:
