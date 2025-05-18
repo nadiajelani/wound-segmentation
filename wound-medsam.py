@@ -2,7 +2,10 @@ import logging
 import sys
 import os
 os.environ["SM_FRAMEWORK"] = "tf.keras"
+
+import torch
 import cv2
+import csv
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
@@ -15,8 +18,6 @@ import time
 import base64
 from PIL import Image
 import io
-from transformers import AutoProcessor, AutoModelForCausalLM
-import torch
 from skimage import transform
 from sklearn.metrics import precision_recall_fscore_support
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -42,6 +43,22 @@ set_global_policy('mixed_float16')
 import tensorflow as tf
 import tensorflow.keras.backend as K
 from tensorflow.keras.utils import get_custom_objects
+
+def log_image_decision(log_path, image_name, brightness, contrast, enhanced, accepted, reason):
+    file_exists = os.path.isfile(log_path)
+    with open(log_path, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        if not file_exists:
+            writer.writerow(['Image Name', 'Brightness', 'Contrast', 'Enhanced', 'Accepted', 'Reason'])
+        writer.writerow([image_name, f"{brightness:.2f}", f"{contrast:.2f}", enhanced, accepted, reason])
+
+# -----------------------------
+# Integration inside load_data loop
+# -----------------------------
+# Place this inside the image loading loop in load_data()
+# Make sure 'output' directory exists
+os.makedirs('output', exist_ok=True)
+log_path = 'output/image_decision_log.csv'
 
 # ---- Define Loss First ----
 class FocalTverskyLoss(tf.keras.losses.Loss):
@@ -71,7 +88,6 @@ def register_segmentation_models_custom_objects():
 # ---- Then call it ----
 register_segmentation_models_custom_objects()
 
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -83,43 +99,16 @@ logger = logging.getLogger(__name__)
 # Global MedSAM model
 medsam_model = None
 device = "cpu"
-if torch.cuda.is_available():
+if torch.backends.mps.is_available():
+    device = "mps"
+elif torch.cuda.is_available():
     device = "cuda:0"
 logger.info(f"Using device: {device}")
-
-# Initialize LLaVA model (use lighter 7B model)
-llava_model = None
-llava_processor = None
-try:
-    llava_model = AutoModelForCausalLM.from_pretrained("llava-hf/llava-7b-hf", torch_dtype=torch.float16)
-    llava_processor = AutoProcessor.from_pretrained("llava-hf/llava-7b-hf")
-    llava_model.to(device)
-    logger.info("Loaded LLaVA-7B model successfully")
-except Exception as e:
-    logger.error(f"Failed to load LLaVA model: {str(e)}")
-    llava_model = None
-    llava_processor = None
 
 # Optimize TensorFlow for CPU
 tf.config.set_soft_device_placement(True)
 tf.config.threading.set_inter_op_parallelism_threads(4)
 tf.config.threading.set_intra_op_parallelism_threads(4)
-
-# Custom Focal Tversky Loss
-class FocalTverskyLoss(tf.keras.losses.Loss):
-    def __init__(self, alpha=0.7, gamma=0.75):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-
-    def call(self, y_true, y_pred):
-        y_true = K.flatten(y_true)
-        y_pred = K.flatten(y_pred)
-        tp = K.sum(y_true * y_pred)
-        fn = K.sum(y_true * (1 - y_pred))
-        fp = K.sum((1 - y_true) * y_pred)
-        tversky = (tp + 1e-7) / (tp + self.alpha * fn + (1 - self.alpha) * fp + 1e-7)
-        return K.pow(1 - tversky, self.gamma)
 
 def load_medsam_model(checkpoint_path):
     global medsam_model
@@ -127,7 +116,12 @@ def load_medsam_model(checkpoint_path):
         state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
         medsam_model = build_sam_vit_b()
         medsam_model.load_state_dict(state_dict)
-        medsam_model = torch.quantization.quantize_dynamic(medsam_model, {torch.nn.Linear}, dtype=torch.qint8)
+        # Skip quantization on MPS
+        if torch.backends.mps.is_available():
+            logger.info("Running on MPS, skipping quantization")
+        else:
+            medsam_model = torch.quantization.quantize_dynamic(medsam_model, {torch.nn.Linear}, dtype=torch.qint8)
+
         medsam_model.to(device)
         medsam_model.eval()
         logger.info(f"Loaded and quantized MedSAM model from {checkpoint_path}")
@@ -151,7 +145,7 @@ def fine_tune_medsam(X_train, y_train, checkpoint_path, epochs=5):
             img_tensor = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
             img_tensor = img_tensor.unsqueeze(0).to(device)
             mask = cv2.resize(mask, (256, 256), interpolation=cv2.INTER_NEAREST)
-            mask_tensor = torch.from_numpy(mask).float().unsqueeze(0).to(device)
+            mask_tensor = torch.from_numpy(mask).float().unsqueeze(0).unsqueeze(0).to(device)
             optimizer.zero_grad()
             image_embedding = medsam_model.image_encoder(img_tensor)
             sparse_embeddings, dense_embeddings = medsam_model.prompt_encoder(points=None, boxes=None, masks=None)
@@ -166,7 +160,7 @@ def fine_tune_medsam(X_train, y_train, checkpoint_path, epochs=5):
             loss.backward()
             optimizer.step()
         logger.info(f"MedSAM Fine-Tuning Epoch {epoch+1}, Loss: {loss.item()}")
-    torch.save(medsam_model.state_dict(), checkpoint_path.replace('.pth', '_finetuned.pth'))
+    torch.save(medsam_model.state_dict(), "./models/best_medsam_model.pth")
     medsam_model.eval()
 
 class VisualizationCallback(Callback):
@@ -236,18 +230,12 @@ def active_learning(model, X_unlabeled, num_samples=10):
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def check_image_quality(image):
-    if llava_model is None or llava_processor is None:
-        logger.error("LLaVA model not loaded")
-        return {"is_valid": False, "message": "LLaVA model not loaded"}
     try:
-        img_uint8 = (image * 255).astype(np.uint8)
-        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        prompt = "Is this medical wound image clear, well-lit, and suitable for analysis? If not, suggest improvements."
-        inputs = llava_processor(text=prompt, images=img_pil, return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = llava_model.generate(**inputs, max_length=150)
-        message = llava_processor.decode(outputs[0], skip_special_tokens=True)
-        is_valid = "clear" in message.lower() and "suitable" in message.lower()
+        gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        brightness = np.mean(gray)
+        contrast = np.std(gray)
+        is_valid = brightness > 50 and brightness < 200 and contrast > 30
+        message = "Image passed heuristic quality check" if is_valid else f"Image failed: brightness={brightness:.1f}, contrast={contrast:.1f}"
         return {"is_valid": is_valid, "message": message}
     except Exception as e:
         logger.error(f"Image quality check failed: {str(e)}")
@@ -255,23 +243,10 @@ def check_image_quality(image):
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def validate_segmentation(image, pred_mask):
-    if llava_model is None or llava_processor is None:
-        logger.error("LLaVA model not loaded")
-        return {"is_valid": False, "message": "LLaVA model not loaded"}
     try:
-        img_uint8 = (image * 255).astype(np.uint8)
-        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        mask_uint8 = (pred_mask * 255).astype(np.uint8)
-        mask_pil = Image.fromarray(mask_uint8)
-        prompt = (
-            "This is a wound image and its AI-generated segmentation mask (white = wound, black = background). "
-            "Does the mask accurately outline the wound? If not, describe any issues and suggest improvements."
-        )
-        inputs = llava_processor(text=prompt, images=[img_pil, mask_pil], return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = llava_model.generate(**inputs, max_length=200)
-        message = llava_processor.decode(outputs[0], skip_special_tokens=True)
-        is_valid = "accurate" in message.lower() or "correct" in message.lower()
+        iou = sm.metrics.IOUScore()(np.expand_dims(pred_mask, 0), np.expand_dims(image, 0) if len(image.shape) == 2 else np.expand_dims(image, -1))
+        is_valid = iou > 0.5
+        message = f"IoU: {iou:.4f}, {'Valid segmentation' if is_valid else 'Invalid segmentation, consider retraining or adjusting MedSAM'}"
         return {"is_valid": is_valid, "message": message}
     except Exception as e:
         logger.error(f"Segmentation validation failed: {str(e)}")
@@ -280,30 +255,17 @@ def validate_segmentation(image, pred_mask):
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def generate_clinical_report(image, pred_mask, severity, healing_potential, validation_result, output_dir):
     os.makedirs(output_dir, exist_ok=True)
-    if llava_model is None or llava_processor is None:
-        logger.error("LLaVA model not loaded")
-        return None
     try:
-        img_uint8 = (image * 255).astype(np.uint8)
-        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        mask_uint8 = (pred_mask * 255).astype(np.uint8)
-        mask_pil = Image.fromarray(mask_uint8)
-        prompt = f"""
-        Generate a clinical wound assessment report based on:
-        - Wound image and segmentation mask (white = wound, black = background).
-        - Severity: {severity}
+        wound_area = np.sum(pred_mask > 0)
+        report_text = f"""
+        Wound Assessment Report
+        - Wound Description: Area {wound_area} pixels, {'mild' if severity.lower() == 'mild' else 'moderate' if severity.lower() == 'moderate' else 'severe'} severity.
+        - Appearance: Based on area and segmentation, {'no obvious infection' if wound_area < 15000 else 'possible infection signs'} detected.
+        - Clinical Recommendations: {'Regular dressing changes' if wound_area < 15000 else 'Dressing changes and possible antibiotics'}.
+        - Patient Instructions: Keep wound clean, follow up in {'1 week' if wound_area < 15000 else '3 days'}.
+        - Validation: {validation_result['message']}
         - Healing Potential: {healing_potential}
-        - Segmentation Validation: {validation_result['message']}
-        Include:
-        - Wound description (size, appearance, infection signs).
-        - Clinical recommendations (e.g., dressing changes, antibiotics).
-        - Patient instructions.
-        Format as a concise medical report.
         """
-        inputs = llava_processor(text=prompt, images=[img_pil, mask_pil], return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = llava_model.generate(**inputs, max_length=500)
-        report_text = llava_processor.decode(outputs[0], skip_special_tokens=True)
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", "B", 16)
@@ -331,75 +293,98 @@ def predict_healing_potential(mask, image, patient_metadata=None):
     else:
         severity = "Severe"
         healing_potential = "Low (20%)"
-    if llava_model is None or llava_processor is None:
-        logger.warning("LLaVA model not loaded, using default severity and healing potential")
-        return severity, healing_potential
-    try:
-        img_uint8 = (image * 255).astype(np.uint8)
-        img_pil = Image.fromarray(cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        mask_uint8 = (mask * 255).astype(np.uint8)
-        mask_pil = Image.fromarray(mask_uint8)
-        prompt = f"""
-        Analyze this wound image and its segmentation mask (white = wound, black = background).
-        - Estimate wound severity (Mild, Moderate, Severe).
-        - Predict healing potential (e.g., High, Moderate, Low with percentage).
-        - Consider wound appearance (color, exudate, necrosis) and area ({wound_area} pixels).
-        """
-        if patient_metadata:
-            prompt += f"Patient metadata: {patient_metadata}"
-        inputs = llava_processor(text=prompt, images=[img_pil, mask_pil], return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = llava_model.generate(**inputs, max_length=200)
-        message = llava_processor.decode(outputs[0], skip_special_tokens=True)
-        if "Severe" in message:
-            severity = "Severe"
-        elif "Moderate" in message:
-            severity = "Moderate"
-        else:
-            severity = "Mild"
-        healing_potential = message.split("healing potential")[-1].strip()[:50] if "healing potential" in message else healing_potential
-        return severity, healing_potential
-    except Exception as e:
-        logger.error(f"Healing potential prediction failed: {str(e)}")
-        return severity, healing_potential
+    if patient_metadata and "diabetes" in patient_metadata and patient_metadata["diabetes"]:
+        healing_potential = f"{float(healing_potential.split('(')[1].rstrip('%)')) - 20}%"
+    return severity, healing_potential
 
-def load_data(image_dir, mask_dir=None, img_size=(128, 128), is_training=True):
-    logger.info(f"Loading data from {image_dir}, is_training={is_training}")
+def load_data(image_dir, mask_dir=None, img_size=(128, 128), api_key=None, is_training=True, mode="strict_qa"):
+    from albumentations import Compose, Resize, Rotate, HorizontalFlip, RandomBrightnessContrast, NoOp
+    import albumentations as A
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Loading data from {image_dir}, is_training={is_training}, mode={mode}")
+
     images, masks, original_images = [], [], []
     if not os.path.exists(image_dir):
         logger.error(f"Image directory {image_dir} does not exist")
         return np.array([]), np.array([]), []
 
+    os.makedirs('output', exist_ok=True)
+    log_path = 'output/image_decision_log.csv'
+
     image_files = os.listdir(image_dir)
     for img_name in image_files:
         img_path = os.path.join(image_dir, img_name)
+        if not os.path.isfile(img_path):
+            continue
+
         img = cv2.imread(img_path)
         if img is None:
             continue
+
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        brightness = np.mean(gray)
+        contrast = np.std(gray)
+        enhanced = False
+
+        if mode in ["auto_enhanced", "strict_qa"] and brightness < 100:
+            img = cv2.convertScaleAbs(img, alpha=1.2, beta=20)
+            enhanced = True
+
+        accepted = True
+        reason = "Passed"
+
+        if mode == "strict_qa" and api_key:
+            quality_result = check_image_quality(img / 255.0, api_key)
+            accepted = quality_result['is_valid']
+            reason = quality_result['message']
+            if not accepted:
+                log_image_decision(log_path, img_name, brightness, contrast, enhanced, accepted, reason)
+                continue
+
+        log_image_decision(log_path, img_name, brightness, contrast, enhanced, accepted, reason)
         original_images.append(img.copy())
-        mask_path = os.path.join(mask_dir, img_name) if mask_dir else None
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE) if mask_path and os.path.exists(mask_path) else np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
-        mask = (mask > 128).astype(np.uint8) if mask is not None else mask
+
+        # Load mask or fallback
+        if mask_dir and os.path.exists(os.path.join(mask_dir, img_name)):
+            mask = cv2.imread(os.path.join(mask_dir, img_name), cv2.IMREAD_GRAYSCALE)
+            if mask is None:
+                mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+            else:
+                mask = (mask > 128).astype(np.uint8)
+        else:
+            mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+
         images.append(img)
         masks.append(mask)
 
-    images, masks = clean_data(np.array(images), np.array(masks))
+    if not images:
+        logger.error("No valid images loaded")
+        return np.array([]), np.array([]), []
 
-    if is_training:
-        synthetic_dir = generate_synthetic_wounds(num_samples=50)
-        synthetic_images, synthetic_masks, _ = load_data(synthetic_dir, synthetic_dir, img_size, is_training=False)
-        images = np.concatenate([images, synthetic_images], axis=0)
-        masks = np.concatenate([masks, synthetic_masks], axis=0)
+    transform = Compose([
+        Resize(img_size[0], img_size[1]),
+        Rotate(limit=40, p=0.5) if is_training else NoOp(),
+        HorizontalFlip(p=0.5) if is_training else NoOp(),
+        RandomBrightnessContrast(p=0.3) if is_training else NoOp(),
+    ])
 
-    transform = advanced_augmentation(is_training)
     augmented_images, augmented_masks = [], []
     for img, mask in zip(images, masks):
         augmented = transform(image=img, mask=mask)
         augmented_images.append(augmented['image'] / 255.0)
         augmented_masks.append((augmented['mask'] > 0.5).astype(np.uint8))
 
+    logger.info(f"Completed data processing for {len(augmented_images)} images")
     return np.array(augmented_images), np.array(augmented_masks), original_images
+
+def enhance_if_dark(img, brightness_threshold=100, alpha=1.2, beta=20):
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    if np.mean(gray) < brightness_threshold:
+        img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
+    return img
 
 def load_data_with_medsam_fallback(image_dir, mask_dir=None, img_size=(128, 128), is_training=True, medsam_model_path=None):
     images, masks, sources, original_images = [], [], [], []
@@ -414,6 +399,10 @@ def load_data_with_medsam_fallback(image_dir, mask_dir=None, img_size=(128, 128)
         if img is None:
             continue
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        quality_result = check_image_quality(img / 255.0)
+        if not quality_result["is_valid"]:
+            logger.warning(f"Skipping image {img_name}: {quality_result['message']}")
+            continue
         original_images.append(img.copy())
         mask_path = os.path.join(mask_dir, img_name) if mask_dir else None
         if mask_path and os.path.exists(mask_path):
@@ -693,7 +682,7 @@ def evaluate_and_visualize(models, X_test, y_test, original_images, use_medsam=F
             heatmap = explainable_ai(models[0], img) if models else np.zeros_like(hybrid_mask)
             shap_values = explain_with_shap(models[0], img)
             severity, healing_potential = predict_healing_potential(hybrid_mask, orig_img, patient_metadata)
-            validation_result = validate_segmentation(orig_img, hybrid_mask)
+            validation_result = validate_segmentation(true_mask, hybrid_mask)
             report_path = generate_clinical_report(orig_img, hybrid_mask, severity, healing_potential, validation_result, report_dir)
             mean_pred, uncertainty = estimate_uncertainty(models[0], img)
             visualize_results(img, true_mask, hybrid_mask, orig_img, heatmap, canny, idx, output_dir, medsam_pred, validation_result, severity, healing_potential)
@@ -720,6 +709,12 @@ def main():
     parser.add_argument('--output_dir', default='output', help='Base output directory')
     parser.add_argument('--patient_metadata', type=str, default='{"diabetes": false, "age": 0}', help='Patient metadata as JSON string')
     parser.add_argument('--verbose', action='store_true', help='Enable debug logging')
+    parser.add_argument(
+    '--image_mode',
+    choices=['raw', 'auto_enhanced', 'strict_qa'],
+    default='strict_qa',
+    help='Image processing mode: raw (no enhancement), auto_enhanced (enhance dark images), strict_qa (enhance + quality check)'
+)
     args = parser.parse_args()
     
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
@@ -737,9 +732,6 @@ def main():
     
     import json
     patient_metadata = json.loads(args.patient_metadata)
-    
-    if llava_model is None or llava_processor is None:
-        logger.warning("LLaVA model not loaded, some functionalities may be limited")
     
     if args.use_medsam and args.medsam_model_path:
         load_medsam_model(args.medsam_model_path)
