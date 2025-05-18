@@ -35,30 +35,10 @@ import json
 from tensorflow.keras.mixed_precision import set_global_policy
 import tensorflow.keras.backend as K
 from tensorflow.keras.layers import Dropout
+from tqdm import tqdm
 
 # Enable mixed precision for TensorFlow
 set_global_policy('mixed_float16')
-
-# ---- Imports ----
-import tensorflow as tf
-import tensorflow.keras.backend as K
-from tensorflow.keras.utils import get_custom_objects
-
-def log_image_decision(log_path, image_name, brightness, contrast, enhanced, accepted, reason):
-    file_exists = os.path.isfile(log_path)
-    with open(log_path, 'a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        if not file_exists:
-            writer.writerow(['Image Name', 'Brightness', 'Contrast', 'Enhanced', 'Accepted', 'Reason'])
-        writer.writerow([image_name, f"{brightness:.2f}", f"{contrast:.2f}", enhanced, accepted, reason])
-
-# -----------------------------
-# Integration inside load_data loop
-# -----------------------------
-# Place this inside the image loading loop in load_data()
-# Make sure 'output' directory exists
-os.makedirs('output', exist_ok=True)
-log_path = 'output/image_decision_log.csv'
 
 # ---- Define Loss First ----
 class FocalTverskyLoss(tf.keras.losses.Loss):
@@ -110,18 +90,24 @@ tf.config.set_soft_device_placement(True)
 tf.config.threading.set_inter_op_parallelism_threads(4)
 tf.config.threading.set_intra_op_parallelism_threads(4)
 
+def log_image_decision(log_path, image_name, brightness, contrast, enhanced, accepted, reason):
+    file_exists = os.path.isfile(log_path)
+    with open(log_path, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        if not file_exists:
+            writer.writerow(['Image Name', 'Brightness', 'Contrast', 'Enhanced', 'Accepted', 'Reason'])
+        writer.writerow([image_name, f"{brightness:.2f}", f"{contrast:.2f}", enhanced, accepted, reason])
+
 def load_medsam_model(checkpoint_path):
     global medsam_model
     try:
         state_dict = torch.load(checkpoint_path, map_location=torch.device('cpu'))
         medsam_model = build_sam_vit_b()
         medsam_model.load_state_dict(state_dict)
-        # Skip quantization on MPS
         if torch.backends.mps.is_available():
             logger.info("Running on MPS, skipping quantization")
         else:
             medsam_model = torch.quantization.quantize_dynamic(medsam_model, {torch.nn.Linear}, dtype=torch.qint8)
-
         medsam_model.to(device)
         medsam_model.eval()
         logger.info(f"Loaded and quantized MedSAM model from {checkpoint_path}")
@@ -132,7 +118,7 @@ def load_medsam_model(checkpoint_path):
         logger.error(f"Failed to load MedSAM model: {str(e)}")
         medsam_model = None
 
-def fine_tune_medsam(X_train, y_train, checkpoint_path, epochs=5):
+def fine_tune_medsam(X_train, y_train, checkpoint_path, epochs=2):
     global medsam_model
     if medsam_model is None:
         load_medsam_model(checkpoint_path)
@@ -140,26 +126,35 @@ def fine_tune_medsam(X_train, y_train, checkpoint_path, epochs=5):
     criterion = torch.nn.BCEWithLogitsLoss()
     medsam_model.train()
     for epoch in range(epochs):
-        for img, mask in zip(X_train, y_train):
+        logger.info(f"MedSAM Fine-Tuning Epoch {epoch+1}/{epochs}")
+        epoch_losses = []
+        for i, (img, mask) in enumerate(tqdm(zip(X_train, y_train), total=len(X_train))):
             img = cv2.resize(img, (1024, 1024))
-            img_tensor = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
-            img_tensor = img_tensor.unsqueeze(0).to(device)
+            img_tensor = torch.from_numpy(img).permute(2, 0, 1).float().unsqueeze(0) / 255.0
+            img_tensor = img_tensor.to(device)
             mask = cv2.resize(mask, (256, 256), interpolation=cv2.INTER_NEAREST)
             mask_tensor = torch.from_numpy(mask).float().unsqueeze(0).unsqueeze(0).to(device)
             optimizer.zero_grad()
-            image_embedding = medsam_model.image_encoder(img_tensor)
-            sparse_embeddings, dense_embeddings = medsam_model.prompt_encoder(points=None, boxes=None, masks=None)
-            outputs, _ = medsam_model.mask_decoder(
-                image_embeddings=image_embedding,
-                image_pe=medsam_model.prompt_encoder.get_dense_pe(),
-                sparse_prompt_embeddings=sparse_embeddings,
-                dense_prompt_embeddings=dense_embeddings,
-                multimask_output=False
-            )
-            loss = criterion(outputs, mask_tensor)
-            loss.backward()
-            optimizer.step()
-        logger.info(f"MedSAM Fine-Tuning Epoch {epoch+1}, Loss: {loss.item()}")
+            try:
+                image_embedding = medsam_model.image_encoder(img_tensor)
+                sparse_embeddings, dense_embeddings = medsam_model.prompt_encoder(points=None, boxes=None, masks=None)
+                outputs, _ = medsam_model.mask_decoder(
+                    image_embeddings=image_embedding,
+                    image_pe=medsam_model.prompt_encoder.get_dense_pe(),
+                    sparse_prompt_embeddings=sparse_embeddings,
+                    dense_prompt_embeddings=dense_embeddings,
+                    multimask_output=False
+                )
+                loss = criterion(outputs, mask_tensor)
+                loss.backward()
+                optimizer.step()
+                epoch_losses.append(loss.item())
+                if i % 100 == 0:
+                    logger.info(f"Epoch {epoch+1}, Step {i}, Loss: {loss.item():.4f}")
+            except Exception as e:
+                logger.warning(f"Skipping batch {i} due to error: {str(e)}")
+                continue
+        logger.info(f"Epoch {epoch+1} Avg Loss: {np.mean(epoch_losses):.4f}")
     torch.save(medsam_model.state_dict(), "./models/best_medsam_model.pth")
     medsam_model.eval()
 
@@ -244,6 +239,12 @@ def check_image_quality(image):
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def validate_segmentation(image, pred_mask):
     try:
+        # For single-image mode, skip validation if no true mask is provided
+        if image is None or np.all(image == 0):
+            return {"is_valid": True, "message": "Validation skipped (no true mask in single-image mode)"}
+        # Ensure both image and pred_mask are uint8
+        image = (image > 0.5).astype(np.uint8) if image.dtype != np.uint8 and image.max() <= 1.0 else image.astype(np.uint8)
+        pred_mask = (pred_mask > 0.5).astype(np.uint8) if pred_mask.dtype != np.uint8 and pred_mask.max() <= 1.0 else pred_mask.astype(np.uint8)
         iou = sm.metrics.IOUScore()(np.expand_dims(pred_mask, 0), np.expand_dims(image, 0) if len(image.shape) == 2 else np.expand_dims(image, -1))
         is_valid = iou > 0.5
         message = f"IoU: {iou:.4f}, {'Valid segmentation' if is_valid else 'Invalid segmentation, consider retraining or adjusting MedSAM'}"
@@ -251,8 +252,7 @@ def validate_segmentation(image, pred_mask):
     except Exception as e:
         logger.error(f"Segmentation validation failed: {str(e)}")
         return {"is_valid": False, "message": f"Error in segmentation validation: {str(e)}"}
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    
 def generate_clinical_report(image, pred_mask, severity, healing_potential, validation_result, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     try:
@@ -297,14 +297,8 @@ def predict_healing_potential(mask, image, patient_metadata=None):
         healing_potential = f"{float(healing_potential.split('(')[1].rstrip('%)')) - 20}%"
     return severity, healing_potential
 
-def load_data(image_dir, mask_dir=None, img_size=(128, 128), api_key=None, is_training=True, mode="strict_qa"):
-    from albumentations import Compose, Resize, Rotate, HorizontalFlip, RandomBrightnessContrast, NoOp
-    import albumentations as A
-
-    import logging
-    logger = logging.getLogger(__name__)
+def load_data(image_dir, mask_dir=None, img_size=(128, 128), is_training=True, mode="strict_qa"):
     logger.info(f"Loading data from {image_dir}, is_training={is_training}, mode={mode}")
-
     images, masks, original_images = [], [], []
     if not os.path.exists(image_dir):
         logger.error(f"Image directory {image_dir} does not exist")
@@ -333,21 +327,16 @@ def load_data(image_dir, mask_dir=None, img_size=(128, 128), api_key=None, is_tr
             img = cv2.convertScaleAbs(img, alpha=1.2, beta=20)
             enhanced = True
 
-        accepted = True
-        reason = "Passed"
-
-        if mode == "strict_qa" and api_key:
-            quality_result = check_image_quality(img / 255.0, api_key)
-            accepted = quality_result['is_valid']
-            reason = quality_result['message']
-            if not accepted:
-                log_image_decision(log_path, img_name, brightness, contrast, enhanced, accepted, reason)
-                continue
-
+        quality_result = check_image_quality(img / 255.0)
+        accepted = quality_result['is_valid']
+        reason = quality_result['message']
         log_image_decision(log_path, img_name, brightness, contrast, enhanced, accepted, reason)
+
+        if not accepted and mode == "strict_qa":
+            continue
+
         original_images.append(img.copy())
 
-        # Load mask or fallback
         if mask_dir and os.path.exists(os.path.join(mask_dir, img_name)):
             mask = cv2.imread(os.path.join(mask_dir, img_name), cv2.IMREAD_GRAYSCALE)
             if mask is None:
@@ -364,11 +353,11 @@ def load_data(image_dir, mask_dir=None, img_size=(128, 128), api_key=None, is_tr
         logger.error("No valid images loaded")
         return np.array([]), np.array([]), []
 
-    transform = Compose([
-        Resize(img_size[0], img_size[1]),
-        Rotate(limit=40, p=0.5) if is_training else NoOp(),
-        HorizontalFlip(p=0.5) if is_training else NoOp(),
-        RandomBrightnessContrast(p=0.3) if is_training else NoOp(),
+    transform = A.Compose([
+        A.Resize(img_size[0], img_size[1]),
+        A.Rotate(limit=40, p=0.5) if is_training else A.NoOp(),
+        A.HorizontalFlip(p=0.5) if is_training else A.NoOp(),
+        A.RandomBrightnessContrast(p=0.3) if is_training else A.NoOp(),
     ])
 
     augmented_images, augmented_masks = [], []
@@ -379,12 +368,6 @@ def load_data(image_dir, mask_dir=None, img_size=(128, 128), api_key=None, is_tr
 
     logger.info(f"Completed data processing for {len(augmented_images)} images")
     return np.array(augmented_images), np.array(augmented_masks), original_images
-
-def enhance_if_dark(img, brightness_threshold=100, alpha=1.2, beta=20):
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    if np.mean(gray) < brightness_threshold:
-        img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
-    return img
 
 def load_data_with_medsam_fallback(image_dir, mask_dir=None, img_size=(128, 128), is_training=True, medsam_model_path=None):
     images, masks, sources, original_images = [], [], [], []
@@ -481,7 +464,13 @@ def medsam_segment(image, medsam_model_path):
         logger.error("MedSAM model not loaded")
         return None
     try:
-        img_1024 = cv2.resize(image, (1024, 1024), interpolation=cv2.INTER_LINEAR)
+        # Ensure image is in uint8 format for OpenCV operations
+        if image.dtype != np.uint8:
+            image_uint8 = (image * 255).astype(np.uint8)
+        else:
+            image_uint8 = image.copy()
+
+        img_1024 = cv2.resize(image_uint8, (1024, 1024), interpolation=cv2.INTER_LINEAR)
         img_1024 = cv2.cvtColor(img_1024, cv2.COLOR_RGB2BGR)
         img_tensor = torch.from_numpy(img_1024).permute(2, 0, 1).float() / 255.0
         img_tensor = img_tensor.unsqueeze(0).to(device)
@@ -507,11 +496,19 @@ def medsam_segment(image, medsam_model_path):
         return None
 
 def feature_extraction(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    # Ensure image is in uint8 format for OpenCV operations
+    if image.dtype != np.uint8:
+        image_uint8 = (image * 255).astype(np.uint8)
+    else:
+        image_uint8 = image.copy()
+
+    gray = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2GRAY)
     canny = cv2.Canny(gray, 100, 200)
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=5)
     return canny / 255.0, sobelx / np.max(np.abs(sobelx)), sobely / np.max(np.abs(sobely))
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 
 def explainable_ai(model, image):
     model_grad = tf.keras.Model(model.inputs, [model.get_layer(index=-2).output, model.output])
@@ -690,11 +687,60 @@ def evaluate_and_visualize(models, X_test, y_test, original_images, use_medsam=F
     with open(os.path.join(output_dir, "error_log.json"), "w") as f:
         json.dump(error_log, f)
 
+def analyze_single_image(image_path, model, medsam_model_path, patient_metadata, output_dir="output"):
+    logger.info(f"Analyzing single image: {image_path}")
+    os.makedirs(output_dir, exist_ok=True)
+    report_dir = os.path.join(output_dir, "reports")
+    os.makedirs(report_dir, exist_ok=True)
+
+    # Load and preprocess image
+    img = cv2.imread(image_path)
+    if img is None:
+        logger.error(f"Could not load image: {image_path}")
+        return
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img_float = img.astype(np.float32) / 255.0  # For model predictions
+    img_uint8 = img.copy()  # For OpenCV operations
+    # Explicitly resize to match model input shape (128, 128)
+    img_resized = tf.image.resize(img_float, (128, 128), method='bilinear')
+    img_resized = tf.expand_dims(img_resized, 0)  # Add batch dimension
+    if img_resized.shape != (1, 128, 128, 3):
+        logger.error(f"Resized image shape {img_resized.shape} does not match expected shape (1, 128, 128, 3)")
+        return
+
+    # Predict with U-Net
+    unet_pred = model.predict(img_resized, verbose=0)[0, ..., 0]
+    unet_mask = (unet_pred > 0.5).astype(np.uint8)
+
+    # Predict with MedSAM
+    medsam_pred = medsam_segment(img_uint8, medsam_model_path) if medsam_model_path and medsam_model else None
+    medsam_mask = tf.image.resize(medsam_pred[..., None], (128, 128), method='nearest').numpy().squeeze().astype(np.uint8) if medsam_pred is not None else unet_mask
+
+    # Combine masks
+    hybrid_mask = combine_masks(unet_mask, medsam_mask, method='union') if medsam_pred is not None else unet_mask
+    hybrid_mask_resized = tf.image.resize(hybrid_mask[..., None], img.shape[:2], method='nearest').numpy().squeeze().astype(np.uint8)
+
+    # Clinical analysis
+    severity, healing_potential = predict_healing_potential(hybrid_mask_resized, img_float, patient_metadata)
+    # Skip validation for single-image mode with dummy mask
+    validation_result = {"is_valid": True, "message": "Validation skipped (no true mask in single-image mode)"}
+    report_path = generate_clinical_report(img_uint8, hybrid_mask_resized, severity, healing_potential, validation_result, report_dir)
+
+    # Visualization
+    canny, _, _ = feature_extraction(img_uint8)
+    heatmap = explainable_ai(model, img_resized[0]) if model else np.zeros_like(hybrid_mask_resized)
+    visualize_results(img_resized[0], np.zeros_like(hybrid_mask_resized, dtype=np.uint8), hybrid_mask_resized, img_float, heatmap, canny, 0, output_dir, medsam_pred, validation_result, severity, healing_potential)
+
+    logger.info(f"\n✅ Single image analysis complete.")
+    logger.info(f"- Report saved at: {report_path}")
+    logger.info(f"- Severity: {severity}")
+    logger.info(f"- Healing Potential: {healing_potential}")
+    
 def main():
-    parser = argparse.ArgumentParser(description='Train or evaluate wound segmentation model.')
+    parser = argparse.ArgumentParser(description='Train, evaluate, or analyze wound segmentation model.')
     parser.add_argument('--train_image_dir', help='Path to training images')
     parser.add_argument('--train_mask_dir', help='Path to training masks')
-    parser.add_argument('--test_image_dir', required=True, help='Path to test images')
+    parser.add_argument('--test_image_dir', help='Path to test images')
     parser.add_argument('--test_mask_dir', help='Path to test masks')
     parser.add_argument('--img_size', type=int, default=128, help='Image size (square)')
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training')
@@ -709,19 +755,42 @@ def main():
     parser.add_argument('--output_dir', default='output', help='Base output directory')
     parser.add_argument('--patient_metadata', type=str, default='{"diabetes": false, "age": 0}', help='Patient metadata as JSON string')
     parser.add_argument('--verbose', action='store_true', help='Enable debug logging')
-    parser.add_argument(
-    '--image_mode',
-    choices=['raw', 'auto_enhanced', 'strict_qa'],
-    default='strict_qa',
-    help='Image processing mode: raw (no enhancement), auto_enhanced (enhance dark images), strict_qa (enhance + quality check)'
-)
+    parser.add_argument('--image_mode', choices=['raw', 'auto_enhanced', 'strict_qa'], default='strict_qa', help='Image processing mode')
+    parser.add_argument('--analyze_image', type=str, help='Path to a single image for analysis (optional)')
     args = parser.parse_args()
-    
+
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     logger.debug(f"Arguments parsed: {vars(args)}")
-    
+
+    if args.analyze_image:
+        # Single image analysis mode
+        if not os.path.exists(args.analyze_image):
+            logger.error(f"Image file not found: {args.analyze_image}")
+            print("Please provide a valid image file path using --analyze_image.")
+            print("Example: python wound-medsam.py --analyze_image /path/to/image.jpg")
+            sys.exit(1)
+
+        # Load models
+        if args.pretrained_model_path and os.path.exists(args.pretrained_model_path):
+            model = build_unet(input_shape=(128, 128, 3))
+            model.load_weights(args.pretrained_model_path)
+        else:
+            logger.error("Pretrained model path not provided or invalid. Please train the model first or provide a valid --pretrained_model_path.")
+            sys.exit(1)
+
+        if args.use_medsam and args.medsam_model_path:
+            load_medsam_model(args.medsam_model_path)
+
+        # Load patient metadata
+        patient_metadata = json.loads(args.patient_metadata)
+
+        # Analyze the image
+        analyze_single_image(args.analyze_image, model, args.medsam_model_path, patient_metadata, args.output_dir)
+        return
+
+    # Training and evaluation mode
     if not args.test_image_dir:
-        logger.error("Test image directory is required")
+        logger.error("Test image directory is required for training/evaluation mode")
         sys.exit(1)
     if args.use_medsam and not args.medsam_model_path:
         logger.error("MedSAM model path required when use_medsam is enabled")
@@ -729,16 +798,15 @@ def main():
     if args.hybrid_mode and not args.use_medsam:
         logger.error("Hybrid mode requires use_medsam to be enabled")
         sys.exit(1)
-    
-    import json
+
     patient_metadata = json.loads(args.patient_metadata)
-    
+
     if args.use_medsam and args.medsam_model_path:
         load_medsam_model(args.medsam_model_path)
         if args.train_image_dir and args.train_mask_dir:
-            X_train, y_train, _ = load_data(args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size), is_training=True)
+            X_train, y_train, _ = load_data(args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size), is_training=True, mode=args.image_mode)
             fine_tune_medsam(X_train, y_train, args.medsam_model_path)
-    
+
     if args.use_medsam_fallback:
         X_test, y_test, sources_test, original_test_images = load_data_with_medsam_fallback(
             args.test_image_dir, args.test_mask_dir, img_size=(args.img_size, args.img_size),
@@ -747,46 +815,43 @@ def main():
     else:
         X_test, y_test, original_test_images = load_data(
             args.test_image_dir, args.test_mask_dir, img_size=(args.img_size, args.img_size),
-            is_training=False
+            is_training=False, mode=args.image_mode
         )
         sources_test = []
-    
+
     if len(X_test) == 0:
         logger.error("No test images loaded. Exiting.")
         sys.exit(1)
-    
+
     y_test = np.expand_dims(y_test, axis=-1).astype('float32')
-    X_test = X_test[:5]
-    y_test = y_test[:5]
-    original_test_images = original_test_images[:5]
-    logger.info(f"Limited to {len(X_test)} test images for debugging")
-    
+    logger.info(f"Processing {len(X_test)} test images")
+
     if args.pretrained_model_path:
         X_train, y_train = np.array([]), np.array([])
         X_val, y_val = np.array([]), np.array([])
     else:
         if not args.train_image_dir or not args.train_mask_dir:
             raise ValueError("Training directories required unless pre-trained model provided")
-        X_train, y_train, _ = load_data(args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size), is_training=True)
+        X_train, y_train, _ = load_data(args.train_image_dir, args.train_mask_dir, img_size=(args.img_size, args.img_size), is_training=True, mode=args.image_mode)
         if len(X_train) == 0:
             logger.error("No training images loaded. Exiting.")
             sys.exit(1)
         X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
         y_train = np.expand_dims(y_train, axis=-1).astype('float32')
         y_val = np.expand_dims(y_val, axis=-1).astype('float32')
-    
+
     logger.info(f"Training set: {len(X_train)}, Validation set: {len(X_val)}, Test set: {len(X_test)}")
-    
+
     models, history = train_model(
         X_train, y_train, X_val, y_val,
         img_size=(args.img_size, args.img_size), batch_size=args.batch_size,
         epochs=args.epochs, model_save_path=args.model_save_path,
         pretrained_model_path=args.pretrained_model_path
     )
-    
+
     for model in models:
         model = adversarial_training(model, X_train, y_train)
-    
+
     evaluate_model(models[0], X_test, y_test)
     evaluate_and_visualize(
         models, X_test, y_test, original_test_images,
