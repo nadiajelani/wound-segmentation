@@ -1,3 +1,7 @@
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+from flask import render_template
+
 import os
 import cv2
 import numpy as np
@@ -6,69 +10,24 @@ import matplotlib.pyplot as plt
 from fpdf import FPDF
 import time
 import json
+import base64
+import uuid
 from datetime import datetime
+from wound_medsam import build_unet, predict_healing_potential, load_medsam_model, medsam_segment
 
-from wound_segmentation import build_unet, predict_healing_potential, load_medsam_model, medsam_segment
+app = Flask(__name__)
+CORS(app)
 
-def generate_patient_report(image, pred_mask, patient_info, severity, healing_potential, wound_area_mm2, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
+UPLOAD_FOLDER = "uploads"
+REPORT_FOLDER = "reports"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(REPORT_FOLDER, exist_ok=True)
 
-    # Calculate estimated diameter
-    wound_area_px = np.sum(pred_mask > 0)
-    estimated_diameter = np.sqrt(wound_area_px / np.pi) * 0.264  # 96 DPI, mm/pixel
+UNET_MODEL_PATH = "/Users/nadiajelani/projects/wound-segmentation/models/best_unet_wound_model.h5"
+MEDSAM_MODEL_PATH = "/Users/nadiajelani/projects/wound-segmentation/models/best_medsam_model.pth"
 
-    # Patient-friendly wound description
-    wound_description = f"""
-    Wound Description:
-    - Size: The wound is about {estimated_diameter:.2f} millimeters wide, roughly {'smaller than a US dime' if estimated_diameter < 18 else 'about the size of a US dime' if estimated_diameter < 22 else 'larger than a US dime'}.
-    - Severity: {severity}
-    - Healing Potential: {healing_potential}
-    """
-    # Simplified instructions
-    patient_instructions = """
-    What to Do:
-    - Keep the wound clean and dry.
-    - Change the dressing daily or as told by your doctor.
-    - Watch for signs like redness, swelling, or pain.
-    - Contact your doctor if the wound doesn't improve in 3–5 days.
-    """
-
-    # Report text
-    report_text = f"""
-    About You:
-    - Name: {patient_info.get('name', 'Unknown')}
-    - Age: {patient_info.get('age', 'Unknown')}
-
-    {wound_description}
-
-    {patient_instructions}
-    """
-
-    # Generate PDF
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "Wound Assessment Report", ln=True, align="C")
-    pdf.set_font("Arial", size=12)
-    pdf.ln(10)
-
-    # Add report text
-    for line in report_text.strip().split("\n"):
-        pdf.multi_cell(0, 10, line.strip().encode('latin-1', 'replace').decode('latin-1'))
-
-    # Add visualization
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    vis_path = os.path.join(output_dir, f"wound_vis_{timestamp}.png")
-    create_visualization(image, pred_mask, vis_path)
-    pdf.ln(10)
-    pdf.image(vis_path, x=10, w=190)
-    pdf.ln(10)
-    pdf.multi_cell(0, 10, "Explanation: The left image shows your wound. The middle image shows the detected wound area. The right image highlights the wound with a green outline.")
-
-    # Save PDF
-    report_path = os.path.join(output_dir, f"patient_wound_report_{timestamp}.pdf")
-    pdf.output(report_path)
-    return report_path, vis_path
+model = build_unet(input_shape=(128, 128, 3))
+model.load_weights(UNET_MODEL_PATH)
 
 def create_visualization(image, pred_mask, output_path):
     img_rgb = (image * 255).astype(np.uint8) if image.max() <= 1.0 else image.copy()
@@ -93,47 +52,96 @@ def create_visualization(image, pred_mask, output_path):
     plt.savefig(output_path, dpi=150)
     plt.close()
 
+def generate_patient_report(image, pred_mask, patient_info, severity, healing_potential, wound_area_mm2, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    # Check write permissions
+    if not os.access(output_dir, os.W_OK):
+        raise PermissionError(f"No write permissions for output directory: {output_dir}")
+
+    wound_area_px = np.sum(pred_mask > 0)
+    estimated_diameter = np.sqrt(wound_area_px / np.pi) * 0.264
+    wound_description = f"""
+    Wound Description:
+    - Size: The wound is about {estimated_diameter:.2f} millimeters wide, roughly {'smaller than a US dime' if estimated_diameter < 18 else 'about the size of a US dime' if estimated_diameter < 22 else 'larger than a US dime'}.
+    - Severity: {severity}
+    - Healing Potential: {healing_potential}
+    """
+    patient_instructions = """
+    What to Do:
+    - Keep the wound clean and dry.
+    - Change the dressing daily or as told by your doctor.
+    - Watch for signs like redness, swelling, or pain.
+    - Contact your doctor if the wound doesn't improve in 3–5 days.
+    """
+    report_text = f"""
+    About You:
+    - Name: {patient_info.get('name', 'Unknown')}
+    - Age: {patient_info.get('age', 'Unknown')}
+
+    {wound_description}
+    {patient_instructions}
+    """
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Wound Assessment Report", ln=True, align="C")
+    pdf.set_font("Arial", size=12)
+    pdf.ln(10)
+    for line in report_text.strip().split("\n"):
+        pdf.multi_cell(0, 10, line.strip().encode('latin-1', 'replace').decode('latin-1'))
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    vis_path = os.path.join(output_dir, f"wound_vis_{timestamp}.png")
+    create_visualization(image, pred_mask, vis_path)
+    pdf.ln(10)
+    pdf.image(vis_path, x=10, w=190)
+    pdf.ln(10)
+    pdf.multi_cell(0, 10, "Explanation: The left image shows your wound. The middle image shows the detected wound area. The right image highlights the wound with a green outline.")
+    report_path = os.path.join(output_dir, f"patient_wound_report_{timestamp}.pdf")
+    pdf.output(report_path)
+    return report_path, vis_path
+
 def analyze_image(image_path, unet_model_path, medsam_model_path, patient_info, output_dir='analysis_output'):
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load and preprocess image
+    # Load image
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"Could not load image: {image_path}")
+
+    # Ensure 3-channel input (handle grayscale images)
+    if len(img.shape) == 2:  # Grayscale
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+    # Convert to RGB and normalize
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) / 255.0
-    img_resized = tf.image.resize(img_rgb, (128, 128))[None, ...]
 
-    # Load U-Net model
-    try:
-        unet_model = build_unet(input_shape=(128, 128, 3))
-        unet_model.load_weights(unet_model_path)
-    except Exception as e:
-        raise ValueError(f"Error loading U-Net model: {e}")
+    # Explicitly resize for model input
+    img_resized = tf.image.resize(img_rgb, (128, 128), method='bilinear')
+    img_resized = tf.expand_dims(img_resized, 0)  # Add batch dimension
+    if img_resized.shape != (1, 128, 128, 3):
+        raise ValueError(f"Resized image shape {img_resized.shape} does not match expected shape (1, 128, 128, 3)")
 
-    # Load MedSAM model
-    try:
-        medsam_model = load_medsam_model(medsam_model_path)
-    except Exception as e:
-        raise ValueError(f"Error loading MedSAM model: {e}")
+    # Load models
+    unet_model = build_unet(input_shape=(128, 128, 3))
+    unet_model.load_weights(unet_model_path)
+    medsam_model = load_medsam_model(medsam_model_path)
 
-    # Predict with U-Net
-    unet_pred = unet_model.predict(img_resized, verbose=0)[0, ..., 0]
+    # Predict masks
+    unet_pred = unet_model.predict([img_resized], verbose=0)[0, ..., 0]  # Pass as list to avoid Keras warning
     unet_mask = (unet_pred > 0.5).astype(np.uint8)
 
-    # Predict with MedSAM
     medsam_mask = medsam_segment(img_rgb, medsam_model)
     medsam_mask = tf.image.resize(medsam_mask[..., None], (128, 128), method='nearest').numpy().squeeze().astype(np.uint8)
 
-    # Combine predictions (union)
     combined_mask = np.logical_or(unet_mask, medsam_mask).astype(np.uint8)
 
-    # Restore original size
+    # Resize mask back to original size
     pred_mask_resized = tf.image.resize(combined_mask[..., None], img_rgb.shape[:2], method='nearest').numpy().squeeze().astype(np.uint8)
 
-    # Estimate clinical info
+    # Clinical analysis
     severity, healing_potential, wound_area_mm2 = predict_healing_potential(pred_mask_resized, img_rgb)
 
-    # Generate report
+    # Generate PDF report
     report_path, vis_path = generate_patient_report(img_rgb, pred_mask_resized, patient_info, severity, healing_potential, wound_area_mm2, output_dir)
 
     print(f"\n✅ Wound analysis complete.")
@@ -143,51 +151,63 @@ def analyze_image(image_path, unet_model_path, medsam_model_path, patient_info, 
     print(f"- Healing Potential: {healing_potential}")
     print(f"- Wound Area: {wound_area_mm2:.2f} mm²")
 
-def main():
-    # Directories and paths
-    input_dir = "/Users/nadiajelani/Desktop/patient_input"
-    unet_model_path = "/Users/nadiajelani/Desktop/Medical Pics/wound-segmentation/models/best_unet_wound_model.h5"
-    medsam_model_path = "/Users/nadiajelani/Desktop/Medical Pics/wound-segmentation/models/medsam_vit_b.pth"
-    output_dir = "/Users/nadiajelani/Desktop/wound_analysis_output"
+    return report_path, vis_path
+
+@app.route("/report/<filename>")
+def serve_report(filename):
+    return send_from_directory(REPORT_FOLDER, filename)
+
+@app.route("/upload", methods=["POST"])
+@app.route("/upload", methods=["POST"])
+def upload():
+    try:
+        if "image" not in request.files:
+            raise ValueError("No image file provided in the request")
+        file = request.files["image"]
+        name = request.form.get("name", "Unknown")
+        age = request.form.get("age", "Unknown")
+        use_medsam = request.form.get("use_medsam", "false").lower() == "true"
+
+        filename = str(uuid.uuid4()) + ".png"
+        image_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(image_path)
+
+        # Validate the saved image
+        img_check = cv2.imread(image_path)
+        if img_check is None:
+            raise ValueError(f"Failed to load the uploaded image: {image_path}. Ensure the file is a valid image (e.g., PNG, JPEG).")
+
+        patient_info = {"name": name, "age": age}
+
+        report_path, vis_path = analyze_image(
+            image_path=image_path,
+            unet_model_path=UNET_MODEL_PATH,
+            medsam_model_path=MEDSAM_MODEL_PATH,
+            patient_info=patient_info,
+            output_dir=REPORT_FOLDER
+        )
+
+        return jsonify({
+            "report_url": f"/report/{os.path.basename(report_path)}",
+        })
     
-    # Instructions for patient
-    print("Please follow these steps to generate your wound report:")
-    print(f"1. Save your wound image (PNG or JPG) in: {input_dir}")
-    print(f"2. Create a file named 'patient_info.json' in {input_dir} with the following format:")
-    print('   ```json')
-    print('   {"name": "Your Name", "age": Your Age}')
-    print('   ```')
-    print("3. Run this script again after placing the files.")
-    print(f"   Example: If your name is John Doe and you're 50, the JSON should be:")
-    print('   {"name": "John Doe", "age": 50}')
-
-    # Check for patient input
-    patient_info_path = os.path.join(input_dir, "patient_info.json")
-    image_path = None
-    for file in os.listdir(input_dir):
-        if file.lower().endswith((".png", ".jpg", ".jpeg")):
-            image_path = os.path.join(input_dir, file)
-            break
-
-    if not os.path.exists(patient_info_path) or not image_path:
-        print("Error: Missing patient_info.json or wound image. Please provide both and try again.")
-        exit()
-
-    # Load patient info
-    try:
-        with open(patient_info_path, "r") as f:
-            patient_info = json.load(f)
-        patient_name = patient_info.get("name", "Unknown")
-        patient_age = patient_info.get("age", "Unknown")
     except Exception as e:
-        print(f"Error reading patient_info.json: {e}")
-        exit()
-
-    # Run analysis
-    try:
-        analyze_image(image_path, unet_model_path, medsam_model_path, patient_info, output_dir)
+        import traceback
+        print("❌ Error during image processing:", str(e))
+        print("Traceback:")
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+    
     except Exception as e:
-        print(f"Error during analysis: {e}")
+        import traceback
+        print("❌ Error during image processing:", str(e))
+        print("Traceback:")
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/")
+def index():
+    return render_template("wound-wisperer.html")
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=True)
