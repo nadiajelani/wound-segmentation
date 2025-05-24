@@ -1,0 +1,226 @@
+# wound_checker.py
+import os
+import sys
+import time
+import json
+import logging
+import cv2
+import numpy as np
+import tensorflow as tf
+from PIL import Image
+import matplotlib.pyplot as plt
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+# Import functions from wound_medsam.py
+from wound_medsam import build_unet, analyze_single_image, load_medsam_model, medsam_segment, predict_healing_potential, generate_clinical_report, explainable_ai, visualize_results
+
+# Debug: Confirm module is loaded
+print("Successfully imported functions from wound_medsam:", build_unet, analyze_single_image, load_medsam_model, medsam_segment, predict_healing_potential, generate_clinical_report, explainable_ai, visualize_results)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
+# Set current date and time
+current_time = "12:42 PM BST, May 24, 2025"
+
+class WoundCheckerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title(f"Wound Checker - {current_time}")
+        self.root.geometry("600x500")
+        self.root.configure(bg="#f6f9fc")
+
+        # Variables
+        self.image_path = tk.StringVar()
+        self.has_diabetes = tk.BooleanVar(value=False)
+        self.age = tk.StringVar(value="0")
+        self.other_diseases = tk.StringVar(value="")
+        self.output_dir = "wound_results"
+        # Default model paths (adjust if models are in a different directory)
+        self.unet_model_path = "/Users/nadiajelani/projects/wound-segmentation/models/best_unet_wound_model.h5"
+        self.medsam_model_path = "/Users/nadiajelani/projects/wound-segmentation/models/medsam.pth"
+        # GUI Elements
+        self.create_widgets()
+
+    def create_widgets(self):
+        # Welcome Message
+        welcome_label = tk.Label(self.root, text=f"Welcome to Wound Checker - {current_time}", font=("Arial", 16, "bold"), bg="#f6f9fc", fg="#3a5199")
+        welcome_label.pack(pady=10)
+
+        # Instructions
+        instructions = tk.Label(self.root, text="Upload a wound photo, tell us about any health conditions, and get a simple report!", 
+                               font=("Arial", 10), bg="#f6f9fc", fg="#555", wraplength=500)
+        instructions.pack(pady=5)
+
+        # Image Selection
+        image_frame = tk.Frame(self.root, bg="#f6f9fc")
+        image_frame.pack(pady=10, fill="x", padx=20)
+        tk.Label(image_frame, text="Pick Your Wound Photo:", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
+        tk.Entry(image_frame, textvariable=self.image_path, width=40).pack(side="left", padx=5)
+        tk.Button(image_frame, text="Choose File", command=self.browse_image, 
+                  bg="#1e3a8a", fg="#ffffff", activebackground="#3b82f6", activeforeground="#ffffff", 
+                  font=("Arial", 11, "bold"), relief="raised", bd=3, padx=10, pady=5).pack(side="left")
+        tk.Label(image_frame, text="(e.g., a photo from your phone)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left", padx=5)
+
+        # Health Conditions
+        health_frame = tk.Frame(self.root, bg="#f6f9fc")
+        health_frame.pack(pady=10, fill="x", padx=20)
+        tk.Label(health_frame, text="Health Information:", font=("Arial", 10, "bold"), bg="#f6f9fc").pack(anchor="w")
+
+        # Diabetes Checkbox
+        tk.Checkbutton(health_frame, text="I have diabetes", variable=self.has_diabetes, bg="#f6f9fc", font=("Arial", 10)).pack(anchor="w")
+
+        # Age Input
+        age_frame = tk.Frame(health_frame, bg="#f6f9fc")
+        age_frame.pack(fill="x", pady=2)
+        tk.Label(age_frame, text="Age (Optional):", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
+        tk.Entry(age_frame, textvariable=self.age, width=10).pack(side="left", padx=5)
+        tk.Label(age_frame, text="(e.g., 45)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left")
+
+        # Other Diseases Input
+        other_frame = tk.Frame(health_frame, bg="#f6f9fc")
+        other_frame.pack(fill="x", pady=2)
+        tk.Label(other_frame, text="Other Conditions (Optional):", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
+        tk.Entry(other_frame, textvariable=self.other_diseases, width=40).pack(side="left", padx=5)
+        tk.Label(other_frame, text="(e.g., hypertension, asthma)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left")
+
+        # Process Button
+        tk.Button(self.root, text="Check Wound", command=self.process_image, 
+                  bg="#15803d", fg="#ffffff", activebackground="#16a34a", activeforeground="#ffffff", 
+                  font=("Arial", 14, "bold"), relief="raised", bd=3, padx=15, pady=8).pack(pady=20)
+
+        # Status Label
+        self.status_label = tk.Label(self.root, text="Status: Ready to start!", font=("Arial", 10), bg="#f6f9fc", fg="#333")
+        self.status_label.pack(pady=5)
+
+    def browse_image(self):
+        file_path = filedialog.askopenfilename(
+            title="Pick Your Wound Photo",
+            filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp *.tiff")]
+        )
+        if file_path:
+            self.image_path.set(file_path)
+            self.status_label.config(text=f"Status: Photo selected: {os.path.basename(file_path)}")
+
+    def verify_models(self):
+        """Check if default model files exist, prompt if not."""
+        # Check U-Net model
+        if not os.path.exists(self.unet_model_path):
+            messagebox.showwarning("Oops!", f"Couldn’t find the wound analysis model at {self.unet_model_path}.\nPlease select it manually.")
+            file_path = filedialog.askopenfilename(
+                title="Pick Wound Analysis Model",
+                filetypes=[("Model Files", "*.keras *.h5")]
+            )
+            if file_path and os.path.exists(file_path):
+                self.unet_model_path = file_path
+                self.status_label.config(text=f"Status: Model selected: {os.path.basename(file_path)}")
+            else:
+                messagebox.showerror("Oh No!", "No model selected. Please provide a valid model file.")
+                return False
+
+        # Check MedSAM model (optional)
+        if not os.path.exists(self.medsam_model_path):
+            logger.info(f"MedSAM model not found at {self.medsam_model_path}. Proceeding without enhanced analysis.")
+            self.medsam_model_path = None
+        return True
+
+    def process_image(self):
+        # Validate inputs
+        image_path = self.image_path.get()
+        age = self.age.get()
+        other_diseases = self.other_diseases.get().strip()
+
+        if not image_path or not os.path.exists(image_path):
+            messagebox.showwarning("Oops!", "Please pick a wound photo to analyze.")
+            return
+
+        # Verify models
+        if not self.verify_models():
+            return
+
+        # Prepare patient info
+        try:
+            age_int = int(age) if age.isdigit() else 0
+        except ValueError:
+            messagebox.showwarning("Oops!", "Age should be a number. Using default (0).")
+            age_int = 0
+
+        patient_info = {
+            "has_diabetes": "yes" if self.has_diabetes.get() else "no",
+            "age": age_int,
+            "other_diseases": other_diseases if other_diseases else "none"
+        }
+
+        # Update status
+        self.status_label.config(text="Status: Checking your wound...")
+
+        # Load and process the image
+        try:
+            # Load the pre-trained U-Net model
+            logger.info(f"Loading model from {self.unet_model_path}")
+            model = build_unet(input_shape=(128, 128, 3))
+            model.load_weights(self.unet_model_path)
+
+            # Load MedSAM model if available
+            medsam_path = self.medsam_model_path
+            if medsam_path:
+                logger.info(f"Loading enhanced model from {medsam_path}")
+                load_medsam_model(medsam_path)
+
+            # Create output directory
+            os.makedirs(self.output_dir, exist_ok=True)
+            report_dir = os.path.join(self.output_dir, "reports")
+            os.makedirs(report_dir, exist_ok=True)
+
+            # Start timing
+            start_time = time.time()
+
+            # Analyze the image with both models
+            analyze_single_image(image_path, model, medsam_path, patient_info, self.output_dir)
+
+            # End timing
+            end_time = time.time()
+            runtime = end_time - start_time
+            logger.info(f"Processing completed in {runtime:.2f} seconds")
+
+            # Additional visualization
+            img = cv2.imread(image_path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_float = img.astype(np.float32) / 255.0
+            img_resized = tf.image.resize(img_float, (128, 128), method='bilinear')
+            img_resized = tf.expand_dims(img_resized, 0)
+            unet_pred = model.predict(img_resized, verbose=0)[0, ..., 0]
+            unet_mask = (unet_pred > 0.5).astype(np.uint8)
+
+            medsam_pred = medsam_segment(img, medsam_path) if medsam_path else None
+            medsam_mask = tf.image.resize(medsam_pred[..., None], (128, 128), method='nearest').numpy().squeeze().astype(np.uint8) if medsam_pred is not None else unet_mask
+            hybrid_mask = unet_mask if medsam_pred is None else (unet_mask + medsam_mask > 0).astype(np.uint8)
+            hybrid_mask_resized = tf.image.resize(hybrid_mask[..., None], img.shape[:2], method='nearest').numpy().squeeze().astype(np.uint8)
+
+            canny = cv2.Canny(cv2.cvtColor((img_float * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY), 100, 200) / 255.0
+            heatmap = explainable_ai(model, img_resized[0])
+            visualize_results(img_resized[0], np.zeros_like(hybrid_mask_resized), hybrid_mask_resized, img_float, heatmap, canny, 0, self.output_dir, medsam_pred)
+
+            # Update status
+            self.status_label.config(text=f"Status: Done! Took {runtime:.2f} seconds")
+            messagebox.showinfo("Great News!", f"Your wound check is complete!\nSee photos: {os.path.join(self.output_dir, 'val_predictions')}\nReport: {report_dir}\nCheck the log for more details.")
+
+        except Exception as e:
+            logger.error(f"Error during processing: {str(e)}")
+            self.status_label.config(text="Status: Something went wrong!")
+            messagebox.showerror("Oh No!", f"Sorry, we couldn’t check the wound. Error: {str(e)}")
+
+def main():
+    """Main function to run the wound checker with a GUI."""
+    root = tk.Tk()
+    app = WoundCheckerApp(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
