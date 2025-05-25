@@ -59,14 +59,26 @@ class WoundCheckerApp:
         instructions.pack(pady=5)
 
         # Image Selection
+        # 👇 Define this first
         image_frame = tk.Frame(self.root, bg="#f6f9fc")
         image_frame.pack(pady=10, fill="x", padx=20)
+
+        # ✅ Add image label
         tk.Label(image_frame, text="Pick Your Wound Photo:", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
+
+        # ✅ Entry field
         tk.Entry(image_frame, textvariable=self.image_path, width=40).pack(side="left", padx=5)
-        tk.Button(image_frame, text="Choose File", command=self.browse_image, 
-                  bg="#1e3a8a", fg="#ffffff", activebackground="#3b82f6", activeforeground="#ffffff", 
-                  font=("Arial", 11, "bold"), relief="raised", bd=3, padx=10, pady=5).pack(side="left")
-        tk.Label(image_frame, text="(e.g., a photo from your phone)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left", padx=5)
+
+        button_frame = tk.Frame(image_frame, bg="#f6f9fc")
+        button_frame.pack(side="left", padx=5)
+
+        tk.Button(button_frame, text="Choose File", command=self.browse_image, 
+          bg="#1e3a8a", fg="#ffffff", activebackground="#3b82f6", activeforeground="#ffffff", 
+          font=("Arial", 11, "bold"), relief="raised", bd=3, padx=10, pady=5).pack(side="top", pady=2)
+
+        tk.Button(button_frame, text="Take Photo", command=self.capture_photo,
+            bg="#2563eb", fg="#ffffff", font=("Arial", 10, "bold"),
+            padx=10, pady=5).pack(side="top", pady=2)
 
         # Health Conditions
         health_frame = tk.Frame(self.root, bg="#f6f9fc")
@@ -89,7 +101,7 @@ class WoundCheckerApp:
         tk.Label(other_frame, text="Other Conditions (Optional):", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
         tk.Entry(other_frame, textvariable=self.other_diseases, width=40).pack(side="left", padx=5)
         tk.Label(other_frame, text="(e.g., hypertension, asthma)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left")
-
+    
         # Process Button
         tk.Button(self.root, text="Check Wound", command=self.process_image, 
                   bg="#15803d", fg="#ffffff", activebackground="#16a34a", activeforeground="#ffffff", 
@@ -215,6 +227,86 @@ class WoundCheckerApp:
             logger.error(f"Error during processing: {str(e)}")
             self.status_label.config(text="Status: Something went wrong!")
             messagebox.showerror("Oh No!", f"Sorry, we couldn’t check the wound. Error: {str(e)}")
+    
+    def capture_photo(self):
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            messagebox.showerror("Camera Error", "Could not open webcam.")
+            return
+
+        brightness = 1.0
+        contrast = 1.0
+        flip_mode = 0  # 0: none, 1: horizontal, 2: vertical
+
+        instructions = """
+        Controls:
+        - Press ↑ / ↓ : Brightness +
+        - Press ← / → : Contrast +
+        - Press 'f'    : Flip horizontal
+        - Press 'v'    : Flip vertical
+        - Press 's'    : Save photo
+        - Press 'q'    : Quit preview
+        """
+
+        messagebox.showinfo("Live Camera Instructions", instructions)
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Apply brightness and contrast
+            frame_adjusted = cv2.convertScaleAbs(frame, alpha=contrast, beta=brightness * 50)
+
+            # Flip image if needed
+            if flip_mode == 1:
+                frame_adjusted = cv2.flip(frame_adjusted, 1)
+            elif flip_mode == 2:
+                frame_adjusted = cv2.flip(frame_adjusted, 0)
+
+            # Add overlay text
+            cv2.putText(frame_adjusted, "Press 's' to Save, Arrows to Adjust, 'f'/'v' to Flip", 
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 255, 50), 1, cv2.LINE_AA)
+
+            cv2.imshow("Adjust Wound Capture", frame_adjusted)
+            key = cv2.waitKey(1) & 0xFF
+
+            # Brightness ↑↓
+            if key == 82:  # Up arrow
+                brightness += 0.1
+            elif key == 84:  # Down arrow
+                brightness -= 0.1
+
+            # Contrast ←→
+            elif key == 81:  # Left arrow
+                contrast -= 0.1
+            elif key == 83:  # Right arrow
+                contrast += 0.1
+
+            # Flip controls
+            elif key == ord('f'):
+                flip_mode = 1
+            elif key == ord('v'):
+                flip_mode = 2
+            elif key == ord('n'):
+                flip_mode = 0
+
+            elif key == ord('s'):
+                # Save and set path
+                img_path = os.path.join("wound_results", "live_capture.jpg")
+                os.makedirs("wound_results", exist_ok=True)
+                cv2.imwrite(img_path, frame_adjusted)
+                self.image_path.set(img_path)
+                self.status_label.config(text="Status: Live photo captured")
+
+            elif key == ord('q'):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+        self.process_image()  # Optional: auto-run after capture
+
+
 
 def main():
     """Main function to run the wound checker with a GUI."""
