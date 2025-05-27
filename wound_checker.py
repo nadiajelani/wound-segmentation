@@ -1,351 +1,170 @@
-# wound_checker.py
 import os
-import sys
-import time
-import json
-import logging
-import cv2
-import numpy as np
-import tensorflow as tf
-from PIL import Image
-import matplotlib.pyplot as plt
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-from skimage.filters.rank import entropy
-from skimage.morphology import disk
+from tkinter import filedialog, messagebox
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import img_to_array, load_img
+import numpy as np
+import matplotlib.pyplot as plt
+import logging
+from datetime import datetime
+import cv2
+import torch
+from torchvision import transforms
 
-# Import functions from wound_medsam.py
-from wound_medsam import build_unet, analyze_single_image, load_medsam_model, medsam_segment, predict_healing_potential, generate_clinical_report, explainable_ai, visualize_results
-
-# Debug: Confirm module is loaded
-print("Successfully imported functions from wound_medsam:", build_unet, analyze_single_image, load_medsam_model, medsam_segment, predict_healing_potential, generate_clinical_report, explainable_ai, visualize_results)
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Set current date and time
-current_time = "06:55 PM BST, May 25, 2025"
+# Configuration
+MODEL_DIR = '/Users/nadiajelani/projects/wound-segmentation/models'
+CLASSIFIER_PATH = os.path.join(MODEL_DIR, 'wound_classifier.h5')  # ResNet50
+UNET_PATH = os.path.join(MODEL_DIR, 'best_unet_wound_model.h5')  # U-Net
+MEDSAM_PATH = os.path.join(MODEL_DIR, 'best_medsam_wound_model.pth')  # MedSAM
+IMG_HEIGHT, IMG_WIDTH = 224, 224
+UNET_INPUT_SIZE = (256, 256)  # Common U-Net input size
+MEDSAM_INPUT_SIZE = (1024, 1024)  # Typical MedSAM input size
+THRESHOLD = 0.5
 
-class WoundCheckerApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title(f"Wound Checker - {current_time}")
-        self.root.geometry("600x500")
-        self.root.configure(bg="#f6f9fc")
+# Load models
+try:
+    classifier_model = load_model(CLASSIFIER_PATH)
+    logger.info("Loaded ResNet50 classifier from %s", CLASSIFIER_PATH)
+    unet_model = load_model(UNET_PATH, compile=False)
+    logger.info("Loaded U-Net model from %s", UNET_PATH)
+    # Load MedSAM with PyTorch
+    medsam_state_dict = torch.load(MEDSAM_PATH, map_location=torch.device('cpu'))
+    # Placeholder: Assume a simple MedSAM model structure (replace with actual architecture)
+    medsam_model = torch.nn.Sequential(
+        torch.nn.Conv2d(3, 64, kernel_size=3, padding=1),
+        torch.nn.ReLU(),
+        torch.nn.Conv2d(64, 1, kernel_size=1)
+    )
+    medsam_model.load_state_dict(medsam_state_dict)
+    medsam_model.eval()
+    logger.info("Loaded MedSAM model from %s", MEDSAM_PATH)
+except Exception as e:
+    logger.error("Failed to load models: %s", str(e))
+    raise
 
-        # Variables
-        self.image_path = tk.StringVar()
-        self.has_diabetes = tk.BooleanVar(value=False)
-        self.age = tk.StringVar(value="0")
-        self.other_diseases = tk.StringVar(value="")
-        self.output_dir = "wound_results"
-        self.unet_model_path = "/Users/nadiajelani/projects/wound-segmentation/models/best_unet_wound_model.h5"
-        self.medsam_model_path = "/Users/nadiajelani/projects/wound-segmentation/models/medsam.pth"
+def preprocess_image(image_path, target_size=(IMG_HEIGHT, IMG_WIDTH)):
+    """Preprocess the image for classification or segmentation."""
+    try:
+        img = load_img(image_path, target_size=target_size)
+        img_array = img_to_array(img) / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
+        return img_array
+    except Exception as e:
+        logger.error("Error preprocessing image %s: %s", image_path, str(e))
+        return None
 
-        # GUI Elements
-        self.create_widgets()
+def classify_image(model, img_array):
+    """Classify the image as wound or non-wound using ResNet50."""
+    prediction = model.predict(img_array, verbose=0)
+    is_wound = prediction[0][0] > THRESHOLD
+    confidence = prediction[0][0] if is_wound else 1 - prediction[0][0]
+    return is_wound, confidence
 
-    def create_widgets(self):
-        welcome_label = tk.Label(self.root, text=f"Welcome to Wound Checker - {current_time}", font=("Arial", 16, "bold"), bg="#f6f9fc", fg="#3a5199")
-        welcome_label.pack(pady=10)
+def torch_to_tf_tensor(torch_tensor):
+    """Convert PyTorch tensor to TensorFlow tensor."""
+    return tf.convert_to_tensor(torch_tensor.numpy(), dtype=tf.float32)
 
-        instructions = tk.Label(self.root, text="Upload a wound photo or take a live photo, tell us about any health conditions, and get a simple report!", 
-                               font=("Arial", 10), bg="#f6f9fc", fg="#555", wraplength=500)
-        instructions.pack(pady=5)
+def segment_wound(unet_model, medsam_model, img_array):
+    """Segment the wound using U-Net and MedSAM."""
+    # U-Net segmentation
+    img_unet = tf.image.resize(img_array[0], UNET_INPUT_SIZE)
+    img_unet = np.expand_dims(img_unet, axis=0)
+    unet_mask = unet_model.predict(img_unet, verbose=0)
+    unet_mask = (unet_mask > 0.5).astype(np.uint8)
 
-        image_frame = tk.Frame(self.root, bg="#f6f9fc")
-        image_frame.pack(pady=10, fill="x", padx=20)
+    # MedSAM segmentation
+    img_medsam = tf.image.resize(img_array[0], MEDSAM_INPUT_SIZE)
+    img_medsam = np.transpose(img_medsam, (0, 3, 1, 2))  # Convert to CHW format for PyTorch
+    img_medsam_torch = torch.from_numpy(img_medsam).float()
+    with torch.no_grad():
+        medsam_mask = medsam_model(img_medsam_torch)
+    medsam_mask = (medsam_mask > 0.5).float().numpy()
+    medsam_mask = np.transpose(medsam_mask, (0, 2, 3, 1))  # Convert back to HWC
+    medsam_mask = tf.image.resize(medsam_mask, UNET_INPUT_SIZE).numpy()
 
-        tk.Label(image_frame, text="Pick Your Wound Photo:", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
-        tk.Entry(image_frame, textvariable=self.image_path, width=40).pack(side="left", padx=5)
+    # Combine masks (average for simplicity)
+    combined_mask = np.mean([unet_mask[0], medsam_mask[0]], axis=0)
+    combined_mask = (combined_mask > 0.5).astype(np.uint8)
+    return combined_mask
 
-        button_frame = tk.Frame(image_frame, bg="#f6f9fc")
-        button_frame.pack(side="left", padx=5)
+def save_results(image_path, is_wound, confidence, mask=None):
+    """Save classification and segmentation results."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    output_dir = os.path.join(os.path.dirname(image_path), 'results')
+    os.makedirs(output_dir, exist_ok=True)
 
-        tk.Button(button_frame, text="Choose File", command=self.browse_image, 
-                  bg="#1e3a8a", fg="#ffffff", activebackground="#3b82f6", activeforeground="#ffffff", 
-                  font=("Arial", 11, "bold"), relief="raised", bd=3, padx=10, pady=5).pack(side="top", pady=2)
+    with open(os.path.join(output_dir, f'{base_name}_result_{timestamp}.txt'), 'w') as f:
+        f.write(f"Date: {datetime.now().strftime('%I:%M %p %Z, %B %d, %Y')}\n")
+        f.write(f"Image: {image_path}\n")
+        f.write(f"Prediction: {'Wound' if is_wound else 'Non-wound'}\n")
+        f.write(f"Confidence: {confidence:.2f}\n")
+    logger.info("Saved classification result to %s", os.path.join(output_dir, f'{base_name}_result_{timestamp}.txt'))
 
-        tk.Button(button_frame, text="Take Photo", command=self.capture_photo,
-                  bg="#2563eb", fg="#ffffff", activebackground="#60a5fa", activeforeground="#ffffff", 
-                  font=("Arial", 10, "bold"), relief="raised", bd=3, padx=10, pady=5).pack(side="top", pady=2)
+    if is_wound and mask is not None:
+        mask_resized = cv2.resize(mask, (IMG_WIDTH, IMG_HEIGHT), interpolation=cv2.INTER_NEAREST)
+        plt.imsave(os.path.join(output_dir, f'{base_name}_mask_{timestamp}.png'), mask_resized, cmap='gray')
+        logger.info("Saved segmentation mask to %s", os.path.join(output_dir, f'{base_name}_mask_{timestamp}.png'))
 
-        tk.Label(image_frame, text="(e.g., a photo from your phone or live capture)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left", padx=5)
+def process_image(image_path):
+    """Process the uploaded or captured image."""
+    img_array = preprocess_image(image_path)
+    if img_array is None:
+        messagebox.showerror("Error", f"Failed to process image: {image_path}")
+        return
 
-        health_frame = tk.Frame(self.root, bg="#f6f9fc")
-        health_frame.pack(pady=10, fill="x", padx=20)
-        tk.Label(health_frame, text="Health Information:", font=("Arial", 10, "bold"), bg="#f6f9fc").pack(anchor="w")
+    is_wound, confidence = classify_image(classifier_model, img_array)
+    result_text = f"Prediction: {'Wound' if is_wound else 'Non-wound'}\nConfidence: {confidence:.2f}"
+    messagebox.showinfo("Result", result_text)
+    logger.info("%s - Confidence: %.2f", "Wound" if is_wound else "Non-wound", confidence)
 
-        tk.Checkbutton(health_frame, text="I have diabetes", variable=self.has_diabetes, bg="#f6f9fc", font=("Arial", 10)).pack(anchor="w")
+    if is_wound:
+        mask = segment_wound(unet_model, medsam_model, img_array)
+        save_results(image_path, is_wound, confidence, mask)
+        plt.imshow(mask, cmap='gray')
+        plt.title('Combined Wound Segmentation Mask (U-Net + MedSAM)')
+        plt.axis('off')
+        plt.show()
+    else:
+        save_results(image_path, is_wound, confidence)
 
-        age_frame = tk.Frame(health_frame, bg="#f6f9fc")
-        age_frame.pack(fill="x", pady=2)
-        tk.Label(age_frame, text="Age (Optional):", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
-        tk.Entry(age_frame, textvariable=self.age, width=10).pack(side="left", padx=5)
-        tk.Label(age_frame, text="(e.g., 45)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left")
+def upload_image():
+    """Handle image upload via GUI."""
+    file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp")])
+    if file_path:
+        process_image(file_path)
 
-        other_frame = tk.Frame(health_frame, bg="#f6f9fc")
-        other_frame.pack(fill="x", pady=2)
-        tk.Label(other_frame, text="Other Conditions (Optional):", font=("Arial", 10), bg="#f6f9fc").pack(side="left")
-        tk.Entry(other_frame, textvariable=self.other_diseases, width=40).pack(side="left", padx=5)
-        tk.Label(other_frame, text="(e.g., hypertension, asthma)", font=("Arial", 8), fg="#777", bg="#f6f9fc").pack(side="left")
+def capture_image():
+    """Handle image capture (placeholder for webcam)."""
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        messagebox.showerror("Error", "Could not open webcam")
+        return
+    ret, frame = cap.read()
+    if ret:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        image_path = os.path.join(os.path.dirname(CLASSIFIER_PATH), f'captured_image_{timestamp}.jpg')
+        cv2.imwrite(image_path, frame)
+        cap.release()
+        process_image(image_path)
+    else:
+        messagebox.showerror("Error", "Failed to capture image")
+        cap.release()
 
-        tk.Button(self.root, text="Check Wound", command=self.process_image, 
-                  bg="#15803d", fg="#ffffff", activebackground="#16a34a", activeforeground="#ffffff", 
-                  font=("Arial", 14, "bold"), relief="raised", bd=3, padx=15, pady=8).pack(pady=20)
+# GUI Setup
+root = tk.Tk()
+root.title("Wound Checker")
+root.geometry("300x200")
 
-        self.status_label = tk.Label(self.root, text="Status: Ready to start!", font=("Arial", 10), bg="#f6f9fc", fg="#333")
-        self.status_label.pack(pady=5)
+upload_btn = tk.Button(root, text="Upload Image", command=upload_image)
+upload_btn.pack(pady=10)
 
-    def browse_image(self):
-        file_path = filedialog.askopenfilename(
-            title="Pick Your Wound Photo",
-            filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp *.tiff")]
-        )
-        if file_path:
-            self.image_path.set(file_path)
-            self.status_label.config(text=f"Status: Photo selected: {os.path.basename(file_path)}")
+capture_btn = tk.Button(root, text="Capture Image", command=capture_image)
+capture_btn.pack(pady=10)
 
-    def capture_photo(self):
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            messagebox.showerror("Camera Error", "Could not open webcam. Ensure your camera is connected and permissions are granted in System Preferences > Security & Privacy > Camera.")
-            return
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-        brightness = 1.0
-        contrast = 1.0
-        flip_mode = 0  # 0: none, 1: horizontal, 2: vertical
-
-        instructions = """
-        Controls:
-        - Up / Down Arrow: Adjust Brightness
-        - Left / Right Arrow: Adjust Contrast
-        - 'f': Flip Horizontal
-        - 'v': Flip Vertical
-        - 'n': No Flip
-        - 's': Save Photo
-        - 'q': Quit Preview
-        """
-        messagebox.showinfo("Live Camera Instructions", instructions)
-
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    messagebox.showerror("Camera Error", "Failed to capture image from webcam.")
-                    break
-
-                frame_adjusted = cv2.convertScaleAbs(frame, alpha=contrast, beta=brightness * 50)
-
-                if flip_mode == 1:
-                    frame_adjusted = cv2.flip(frame_adjusted, 1)
-                elif flip_mode == 2:
-                    frame_adjusted = cv2.flip(frame_adjusted, 0)
-
-                overlay_text = f"Brightness: {brightness:.1f}, Contrast: {contrast:.1f}"
-                cv2.putText(frame_adjusted, overlay_text, (10, 20), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-                cv2.putText(frame_adjusted, "Press 's' to Save, 'q' to Quit", (10, 45),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 1)
-
-                cv2.imshow("MacBook Camera - Adjust and Capture", frame_adjusted)
-                key = cv2.waitKey(1) & 0xFF
-
-                if key == 82:  # Up arrow
-                    brightness = min(brightness + 0.1, 3.0)
-                elif key == 84:  # Down arrow
-                    brightness = max(brightness - 0.1, 0.1)
-                elif key == 81:  # Left arrow
-                    contrast = max(contrast - 0.1, 0.1)
-                elif key == 83:  # Right arrow
-                    contrast = min(contrast + 0.1, 3.0)
-                elif key == ord('f'):
-                    flip_mode = 1
-                elif key == ord('v'):
-                    flip_mode = 2
-                elif key == ord('n'):
-                    flip_mode = 0
-                elif key == ord('s'):
-                    img_path = os.path.join(self.output_dir, "live_capture.jpg")
-                    os.makedirs(self.output_dir, exist_ok=True)
-                    cv2.imwrite(img_path, frame_adjusted)
-                    self.image_path.set(img_path)
-                    self.status_label.config(text="Status: Live photo captured")
-                    if messagebox.askyesno("Review Photo", "Photo captured! Do you want to use this photo for analysis? Click 'No' to retake."):
-                        break
-                    else:
-                        self.status_label.config(text="Status: Retake photo")
-                        continue
-                elif key == ord('q'):
-                    self.status_label.config(text="Status: Camera preview closed")
-                    break
-
-        finally:
-            cap.release()
-            cv2.destroyAllWindows()
-
-    def verify_models(self):
-        if not os.path.exists(self.unet_model_path):
-            messagebox.showwarning("Oops!", f"Couldn’t find the wound analysis model at {self.unet_model_path}.\nPlease select it manually.")
-            file_path = filedialog.askopenfilename(
-                title="Pick Wound Analysis Model",
-                filetypes=[("Model Files", "*.keras *.h5")]
-            )
-            if file_path and os.path.exists(file_path):
-                self.unet_model_path = file_path
-                self.status_label.config(text=f"Status: Model selected: {os.path.basename(file_path)}")
-            else:
-                messagebox.showerror("Oh No!", "No model selected. Please provide a valid model file.")
-                return False
-
-        if not os.path.exists(self.medsam_model_path):
-            logger.info(f"MedSAM model not found at {self.medsam_model_path}. Proceeding without enhanced analysis.")
-            self.medsam_model_path = None
-        return True
-
-    def has_wound_features(self, img):
-        """Enhanced check for wound-like features using color, edge, and texture analysis."""
-        # Resize image for faster processing
-        img_small = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
-
-        # Color analysis in HSV space
-        img_hsv = cv2.cvtColor(img_small, cv2.COLOR_RGB2HSV)
-        lower_red1 = np.array([0, 50, 50])
-        upper_red1 = np.array([10, 255, 255])
-        lower_red2 = np.array([170, 50, 50])
-        upper_red2 = np.array([180, 255, 255])
-        lower_yellow = np.array([20, 50, 50])
-        upper_yellow = np.array([40, 255, 255])
-        lower_black = np.array([0, 0, 0])
-        upper_black = np.array([180, 255, 30])
-
-        mask_red1 = cv2.inRange(img_hsv, lower_red1, upper_red1)
-        mask_red2 = cv2.inRange(img_hsv, lower_red2, upper_red2)
-        mask_yellow = cv2.inRange(img_hsv, lower_yellow, upper_yellow)
-        mask_black = cv2.inRange(img_hsv, lower_black, upper_black)
-        mask = mask_red1 | mask_red2 | mask_yellow | mask_black
-
-        # Ensure a minimum area of wound-like colors
-        color_area = np.sum(mask) / 255
-        if color_area < 500:  # Minimum 500 pixels of wound-like colors
-            return False
-
-        color_ratio = color_area / mask.size
-        if color_ratio < 0.1:  # Stricter threshold
-            return False
-
-        # Edge detection
-        img_gray = cv2.cvtColor(img_small, cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(img_gray, 100, 200)
-        edge_ratio = np.sum(edges) / (255 * edges.size)
-        if edge_ratio < 0.02:  # Stricter threshold
-            return False
-
-        # Texture analysis using entropy (irregular patterns in wounds)
-        entropy_img = entropy(img_gray, disk(5))
-        entropy_mean = np.mean(entropy_img)
-        if entropy_mean < 3.0:  # Wounds typically have higher entropy due to irregular texture
-            return False
-
-        return True
-
-    def process_image(self):
-        image_path = self.image_path.get()
-        age = self.age.get()
-        other_diseases = self.other_diseases.get().strip()
-
-        if not image_path or not os.path.exists(image_path):
-            messagebox.showwarning("Oops!", "Please pick or capture a wound photo to analyze.")
-            return
-
-        img = cv2.imread(image_path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        if not self.has_wound_features(img):
-            self.status_label.config(text="Status: No wound detected in the image.")
-            messagebox.showwarning("No Wound Detected", "The selected image does not appear to contain a wound. Please upload or capture a different image.")
-            return
-
-        if not self.verify_models():
-            return
-
-        try:
-            age_int = int(age) if age.isdigit() else 0
-        except ValueError:
-            messagebox.showwarning("Oops!", "Age should be a number. Using default (0).")
-            age_int = 0
-
-        patient_info = {
-            "has_diabetes": "yes" if self.has_diabetes.get() else "no",
-            "age": age_int,
-            "other_diseases": other_diseases if other_diseases else "none"
-        }
-
-        self.status_label.config(text="Status: Checking your wound...")
-
-        try:
-            logger.info(f"Loading model from {self.unet_model_path}")
-            model = build_unet(input_shape=(128, 128, 3))
-            model.load_weights(self.unet_model_path)
-
-            medsam_path = self.medsam_model_path
-            if medsam_path:
-                logger.info(f"Loading enhanced model from {medsam_path}")
-                load_medsam_model(medsam_path)
-
-            os.makedirs(self.output_dir, exist_ok=True)
-            report_dir = os.path.join(self.output_dir, "reports")
-            os.makedirs(report_dir, exist_ok=True)
-
-            start_time = time.time()
-
-            img_float = img.astype(np.float32) / 255.0
-            img_resized = tf.image.resize(img_float, (128, 128), method='bilinear')
-            img_resized = tf.expand_dims(img_resized, 0)
-
-            unet_pred = model.predict(img_resized, verbose=0)[0, ..., 0]
-            unet_mask = (unet_pred > 0.5).astype(np.uint8)
-
-            wound_area = np.sum(unet_mask)
-            if wound_area < 1000:  # Stricter threshold for segmentation
-                self.status_label.config(text="Status: No significant wound detected.")
-                messagebox.showwarning("No Wound Detected", "The image does not contain a significant wound area. Please upload or capture a different image.")
-                return
-
-            analyze_single_image(image_path, model, medsam_path, patient_info, self.output_dir)
-
-            end_time = time.time()
-            runtime = end_time - start_time
-            logger.info(f"Processing completed in {runtime:.2f} seconds")
-
-            medsam_pred = medsam_segment(img, medsam_path) if medsam_path else None
-            medsam_mask = tf.image.resize(medsam_pred[..., None], (128, 128), method='nearest').numpy().squeeze().astype(np.uint8) if medsam_pred is not None else unet_mask
-            hybrid_mask = unet_mask if medsam_pred is None else (unet_mask + medsam_mask > 0).astype(np.uint8)
-            hybrid_mask_resized = tf.image.resize(hybrid_mask[..., None], img.shape[:2], method='nearest').numpy().squeeze().astype(np.uint8)
-
-            canny = cv2.Canny(cv2.cvtColor((img_float * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY), 100, 200) / 255.0
-            heatmap = explainable_ai(model, img_resized[0])
-            visualize_results(img_resized[0], np.zeros_like(hybrid_mask_resized), hybrid_mask_resized, img_float, heatmap, canny, 0, self.output_dir, medsam_pred)
-
-            self.status_label.config(text=f"Status: Done! Took {runtime:.2f} seconds")
-            messagebox.showinfo("Great News!", f"Your wound check is complete!\nSee photos: {os.path.join(self.output_dir, 'val_predictions')}\nReport: {report_dir}\nCheck the log for more details.")
-
-        except Exception as e:
-            logger.error(f"Error during processing: {str(e)}")
-            self.status_label.config(text="Status: Something went wrong!")
-            messagebox.showerror("Oh No!", f"Sorry, we couldn’t check the wound. Error: {str(e)}")
-
-def main():
-    root = tk.Tk()
-    app = WoundCheckerApp(root)
-    root.mainloop()
-
-if __name__ == "__main__":
-    main()
+root.mainloop()
