@@ -1,8 +1,10 @@
+
 import os
 import shutil
 from PIL import Image
 import logging
 from datetime import datetime
+from collections import defaultdict
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
@@ -18,17 +20,50 @@ SUPPORTED_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')  # Supported i
 # Create quarantine directory
 os.makedirs(QUARANTINE_DIR, exist_ok=True)
 
+def check_permissions(file_path):
+    """Check if the file has read permissions."""
+    try:
+        return os.access(file_path, os.R_OK)
+    except Exception as e:
+        logger.warning("Permission check failed for %s: %s", file_path, str(e))
+        return False
+
+def check_symlink(file_path):
+    """Check if the file is a broken symbolic link."""
+    try:
+        if os.path.islink(file_path):
+            target = os.readlink(file_path)
+            if not os.path.exists(target):
+                return True, "Broken symbolic link"
+        return False, None
+    except Exception as e:
+        logger.warning("Symlink check failed for %s: %s", file_path, str(e))
+        return False, None
+
 def scan_directory(directory, subset_name):
     """Scan a directory for images and identify problematic files."""
     logger.info("Scanning %s directory: %s", subset_name, directory)
     problematic_files = []
     total_files = 0
     valid_files = 0
+    class_counts = defaultdict(int)  # Track images per class
 
     for root, _, files in os.walk(directory):
+        class_name = os.path.basename(root)
         for file in files:
             file_path = os.path.join(root, file)
             total_files += 1
+
+            # Check permissions
+            if not check_permissions(file_path):
+                problematic_files.append((file_path, "No read permission"))
+                continue
+
+            # Check for broken symbolic links
+            is_broken_symlink, reason = check_symlink(file_path)
+            if is_broken_symlink:
+                problematic_files.append((file_path, reason))
+                continue
 
             # Skip files with unsupported extensions
             if not file.lower().endswith(SUPPORTED_EXTENSIONS):
@@ -42,11 +77,13 @@ def scan_directory(directory, subset_name):
                     img.verify()  # Verify the image is valid
                     img.close()
                     valid_files += 1
+                    class_counts[class_name] += 1
             except Exception as e:
                 logger.error("Failed to load image %s: %s", file_path, str(e))
                 problematic_files.append((file_path, str(e)))
 
     logger.info("Found %d total files, %d valid images in %s", total_files, valid_files, subset_name)
+    logger.info("Class distribution in %s: %s", subset_name, dict(class_counts))
     return problematic_files
 
 def quarantine_files(problematic_files):
