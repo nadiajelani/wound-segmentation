@@ -42,8 +42,9 @@ def build_simclr_unet(input_shape=(224, 224, 3), num_classes=1, encoder_weights_
     d3 = decoder_block(d2, skip2, 128)
     d4 = decoder_block(d3, skip1, 64)
 
-    # Final output
-    outputs = Conv2D(num_classes, 1, activation='sigmoid')(d4)
+    # Add final upsampling to match input resolution
+    x = UpSampling2D((2, 2))(d4)  # 112 -> 224
+    outputs = Conv2D(num_classes, 1, activation='sigmoid')(x)
 
     model = Model(inputs, outputs)
     return model
