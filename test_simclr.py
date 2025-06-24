@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser(description="Wound Detection and Analysis")
 parser.add_argument("--sensitivity", type=str, default="medium", choices=["low", "medium", "high"],
                     help="Sensitivity level for segmentation threshold (low, medium, high)")
 parser.add_argument("--video_path", type=str, default=None,
-                    help="Path to input video (optional, e.g., .mov)")
+                    help="Path to input video (optional)")
 parser.add_argument("--test_type", type=str, default=None, choices=["v", "vi"],
                     help="Test with Type V or VI images (optional)")
 args = parser.parse_args()
@@ -24,25 +24,46 @@ root.withdraw()  # Hide the main window
 
 # === Skin Type Estimation Functions ===
 def estimate_skin_type(image_path, method='hybrid'):
+    """
+    Estimate Fitzpatrick skin type from an image using HSV and ITA methods.
+    Args:
+        image_path (str): Path to RGB image.
+        method (str): 'hsv', 'ita', or 'hybrid'
+    Returns:
+        str: Fitzpatrick Type I–VI or Unknown
+    """
+    # Load and resize image
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError("Failed to load image.")
+
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_lab = color.rgb2lab(img_rgb)
     img_hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
+
+    # HSV estimation
     avg_hue = np.mean(img_hsv[:, :, 0])
     avg_sat = np.mean(img_hsv[:, :, 1])
     avg_val = np.mean(img_hsv[:, :, 2])
+
+    # ITA estimation
     L = img_lab[:, :, 0]
     B = img_lab[:, :, 2]
+
     L = np.where(L != 0, L, np.nan)
     B = np.where(B != 0, B, np.nan)
+
     ita = math.atan2(np.nanmean(L) - 50, np.nanmean(B)) * (180 / np.pi)
+
+    # --- Decision Logic ---
     if method == 'ita':
         return ita_to_type(ita)
+
     elif method == 'hsv':
         return hsv_to_type(avg_hue, avg_sat, avg_val)
+
     elif method == 'hybrid':
+        # Use ITA if saturation and brightness are reliable
         if avg_sat > 20 and avg_val > 50:
             ita_type = ita_to_type(ita)
             hsv_type = hsv_to_type(avg_hue, avg_sat, avg_val)
@@ -51,26 +72,37 @@ def estimate_skin_type(image_path, method='hybrid'):
             return "Unknown"
 
 def ita_to_type(ita):
-    if ita >= 45: return "Type I"
-    elif ita > 28: return "Type II"
-    elif ita > 17: return "Type III"
-    elif ita > 5: return "Type IV"
-    elif ita > -20: return "Type V"
-    else: return "Type VI"
+    # Empirical threshold (can be replaced by 'kinyanjui')
+    if ita >= 45:
+        return "Type I"
+    elif ita > 28:
+        return "Type II"
+    elif ita > 17:
+        return "Type III"
+    elif ita > 5:
+        return "Type IV"
+    elif ita > -20:
+        return "Type V"
+    else:
+        return "Type VI"
 
 def hsv_to_type(hue, sat, val):
-    if sat < 20 or val < 50: return "Unknown"
-    if hue < 15 or hue > 170: return "Type I-II"
-    elif 15 <= hue < 35: return "Type III"
-    elif 35 <= hue < 55: return "Type IV"
-    elif 55 <= hue < 75: return "Type V"
-    elif hue >= 75: return "Type VI"
+    if sat < 20 or val < 50:
+        return "Unknown"
+    if hue < 15 or hue > 170:
+        return "Type I-II"
+    elif 15 <= hue < 35:
+        return "Type III"
+    elif 35 <= hue < 55:
+        return "Type IV"
+    elif 55 <= hue < 75:
+        return "Type V"
+    elif hue >= 75:
+        return "Type VI"
     return "Unknown"
 
-# === Interactive input for normal skin ===
+# === Interactive input for normal skin and wound/video ===
 print("Step 1: Please select a normal skin image for calibration.")
-messagebox.showinfo("Why a Skin Image?", 
-    "We need a normal skin image to estimate your Fitzpatrick skin type (I–VI). This helps adjust the model for accurate wound and bleeding detection across different skin tones and lighting conditions.")
 max_retries = 3
 for attempt in range(max_retries):
     skin_file_path = filedialog.askopenfilename(
@@ -80,6 +112,7 @@ for attempt in range(max_retries):
     if not skin_file_path:
         print("No skin image selected. Exiting.")
         exit()
+
     try:
         skin_tone = estimate_skin_type(skin_file_path, method='hybrid')
         if skin_tone == "Unknown":
@@ -105,28 +138,13 @@ for attempt in range(max_retries):
 
 print(f"Using skin tone: {skin_tone}")
 
-# === Option to select video or image for wound ===
-choice = messagebox.askquestion("Next Step", 
-    "Would you like to analyze a video (e.g., .mov) or an image (e.g., .jpg, .png) of the wound?",
-    icon='question', default='yes', type='yesno')
-if choice == 'yes':
-    print("Step 2: Please select a wound video (e.g., .mov) for analysis.")
-    file_types = [
-        ("Video files", "*.mov *.mp4 *.avi"),
-        ("All files", "*.*")
-    ]
-else:
-    print("Step 2: Please select a wound image (e.g., .jpg, .png) for analysis.")
-    file_types = [
-        ("Image files", "*.jpg *.jpeg *.png"),
-        ("All files", "*.*")
-    ]
-
+print("Step 2: Please select a wound image or video for analysis.")
 file_path = None
 if args.video_path and os.path.exists(args.video_path):
     file_path = args.video_path
     print(f"Using video path: {file_path}")
 elif args.test_type:
+    # Load a sample Type V or VI image for testing
     test_dir = f"/Users/nadiajelani/projects/wound-segmentation/data/type_{args.test_type}/"
     image_files = [f for f in os.listdir(test_dir) if f.endswith(('.jpg', '.jpeg', '.png'))]
     if image_files:
@@ -136,15 +154,18 @@ elif args.test_type:
         print(f"No images found in {test_dir}. Exiting.")
         exit()
 else:
+    file_types = [
+        ("Image files", "*.jpg *.jpeg *.png"),
+        ("Video files", "*.mp4 *.avi"),
+        ("All files", "*.*")
+    ]
     file_path = filedialog.askopenfilename(
-        title=f"Select a wound {('video' if choice == 'yes' else 'image')}",
-        filetypes=file_types,
-        initialdir="/"
+        title="Select a wound image or video file",
+        filetypes=file_types
     )
     if not file_path:
         print("No file selected. Exiting.")
         exit()
-    print(f"Selected file: {file_path}")
 
 # === File paths and parameters ===
 seg_model_path = "/Users/nadiajelani/projects/wound-segmentation/models/simclr_unet_wound_segmentation.keras"
@@ -181,11 +202,10 @@ def process_frame(frame, skin_tone=None):
 if args.video_path and os.path.exists(args.video_path):
     cap = cv2.VideoCapture(args.video_path)
     if not cap.isOpened():
-        print(f"Error: Could not open video file {args.video_path}. Check codec compatibility (e.g., install FFmpeg for .mov support) or file path.")
+        print(f"Error: Could not open video file {args.video_path}")
         exit()
     frames_rgb = []
     frames_tensor = []
-    frame_count = 0
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -193,43 +213,17 @@ if args.video_path and os.path.exists(args.video_path):
         image_rgb, input_tensor = process_frame(frame, skin_tone)
         frames_rgb.append(image_rgb)
         frames_tensor.append(input_tensor)
-        frame_count += 1
-        if frame_count % 10 == 0:
-            print(f"Processed {frame_count} frames...")
     cap.release()
     input_tensor = np.concatenate(frames_tensor, axis=0)
     mode = "video"
-    print(f"Processed {frame_count} frames from video")
+    print(f"Processed {len(frames_rgb)} frames from video")
 else:
-    if file_path.lower().endswith(('.mov', '.mp4', '.avi')):
-        cap = cv2.VideoCapture(file_path)
-        if not cap.isOpened():
-            print(f"Error: Could not open video file {file_path}. Check codec compatibility (e.g., install FFmpeg for .mov support) or file path.")
-            exit()
-        frames_rgb = []
-        frames_tensor = []
-        frame_count = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            image_rgb, input_tensor = process_frame(frame, skin_tone)
-            frames_rgb.append(image_rgb)
-            frames_tensor.append(input_tensor)
-            frame_count += 1
-            if frame_count % 10 == 0:
-                print(f"Processed {frame_count} frames...")
-        cap.release()
-        input_tensor = np.concatenate(frames_tensor, axis=0)
-        mode = "video"
-        print(f"Processed {frame_count} frames from video")
-    else:
-        image = cv2.imread(file_path)
-        if image is None:
-            print(f"Error: Could not load image file {file_path}")
-            exit()
-        image_rgb, input_tensor = process_frame(image, skin_tone)
-        mode = "image"
+    image = cv2.imread(file_path)
+    if image is None:
+        print(f"Error: Could not load image file {file_path}")
+        exit()
+    image_rgb, input_tensor = process_frame(image, skin_tone)
+    mode = "image"
 
 # === Predict with classifier ===
 cls_preds = cls_model.predict(input_tensor)
@@ -238,10 +232,6 @@ if mode == "video":
     max_confidence_idx = np.argmax(cls_preds)
     wound_confidence = cls_preds[max_confidence_idx]
     is_wound = wound_confidence > 0.5
-    gradcam_strength = np.max(heatmap) if 'heatmap' in locals() else 0
-    if gradcam_strength > 0.5 and wound_confidence > 0.3:
-        print("🧠 Grad-CAM activation is strong. Overriding low classifier confidence.")
-        is_wound = True
     wound_label = "Wound" if is_wound else "Non-Wound"
     input_tensor = input_tensor[max_confidence_idx:max_confidence_idx + 1]
     image_rgb = frames_rgb[max_confidence_idx]
@@ -249,10 +239,6 @@ if mode == "video":
 else:
     wound_confidence = float(cls_preds[0][0])
     is_wound = wound_confidence > 0.5
-    gradcam_strength = np.max(heatmap) if 'heatmap' in locals() else 0
-    if gradcam_strength > 0.5 and wound_confidence > 0.3:
-        print("🧠 Grad-CAM activation is strong. Overriding low classifier confidence.")
-        is_wound = True
     wound_label = "Wound" if is_wound else "Non-Wound"
     print(f"Classifier Result: {wound_label} detected with confidence {wound_confidence:.2f}")
 
@@ -291,6 +277,7 @@ pred_mask = seg_model.predict(input_tensor)[0]
 max_pred = np.max(pred_mask)
 print(f"Raw prediction max: {max_pred:.4f}, min: {np.min(pred_mask):.4f}")
 
+# Map sensitivity to threshold multiplier
 sensitivity_map = {"low": 0.3, "medium": 0.5, "high": 0.7}
 threshold_multiplier = sensitivity_map[args.sensitivity]
 dynamic_threshold = max_pred * threshold_multiplier
@@ -303,53 +290,28 @@ else:
     print("⚠️ No segmentation detected with dynamic threshold. Using lowest threshold (0.1).")
     pred_bin = (pred_mask > 0.1).astype(np.uint8) * 255
 
-# === Enhanced bleeding detection with dark skin support ===
+# === Enhanced bleeding detection using HSV ===
 pred_bin_resized = cv2.resize(pred_bin, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
 pred_bin_resized_3d = np.expand_dims(pred_bin_resized, axis=2)
 masked_image = pred_bin_resized_3d * image_rgb / 255.0
 masked_image_uint8 = masked_image.astype(np.uint8)
-
-if skin_tone in ["Type V", "Type VI"]:
-    lower_red1 = np.array([0, 40, 30])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([160, 40, 30])
-    upper_red2 = np.array([180, 255, 255])
-else:
-    lower_red1 = np.array([0, 70, 50])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([160, 70, 50])
-    upper_red2 = np.array([180, 255, 255])
-
-masked_hsv = cv2.cvtColor(masked_image_uint8, cv2.COLOR_RGB2HSV)
-mask1 = cv2.inRange(masked_hsv, lower_red1, upper_red1)
-mask2 = cv2.inRange(masked_hsv, lower_red2, upper_red2)
-bleeding_mask_hsv = cv2.bitwise_or(mask1, mask2)
-
-img_lab = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2LAB)
-L, A, B = cv2.split(img_lab)
-lab_mask = (A > 135) & (L < 100)
-lab_mask = lab_mask.astype(np.uint8) * 255
-bleeding_mask_lab = cv2.bitwise_and(lab_mask, pred_bin_resized)
-bleeding_mask_combined = cv2.bitwise_or(bleeding_mask_hsv, bleeding_mask_lab)
-bleed_area = np.sum(bleeding_mask_combined > 0)
-wound_area = np.sum(pred_bin_resized > 0)
-bleed_ratio = bleed_area / (wound_area + 1e-6)
-bleeding_detected = bleed_ratio > 0.25
+hsv_image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
+mask_hsv = cv2.cvtColor(masked_image_uint8, cv2.COLOR_RGB2HSV)
+lower_red1 = np.array([0, 70, 50])
+upper_red1 = np.array([10, 255, 255])
+lower_red2 = np.array([160, 70, 50])
+upper_red2 = np.array([180, 255, 255])
+mask1 = cv2.inRange(mask_hsv, lower_red1, upper_red1)
+mask2 = cv2.inRange(mask_hsv, lower_red2, upper_red2)
+bleeding_mask = cv2.bitwise_or(mask1, mask2)
+bleeding_detected = np.sum(bleeding_mask[pred_bin_resized > 0]) / (np.sum(pred_bin_resized > 0) + 1e-6) > 1000
 if bleeding_detected:
-    print(f"⚠️ High bleeding ratio detected: {bleed_ratio:.2f}. Suggest immediate medical attention.")
+    print("⚠️ Bleeding detected! Suggest immediate medical attention.")
 
-# === Mask + Grad-CAM Fusion ===
-if np.sum(pred_bin) < 100 and np.max(heatmap) > 0.5:
-    print("🧠 Using Grad-CAM heatmap as fallback due to weak mask.")
-    gradcam_mask = (heatmap > 0.3).astype(np.uint8) * 255
-    pred_bin = gradcam_mask
-
-# === Convert heatmap to overlay with bleeding emphasis ===
+# === Convert heatmap to overlay ===
 heatmap = cv2.resize(heatmap, (image_rgb.shape[1], image_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
 heatmap_color = cv2.applyColorMap(np.uint8(255 * heatmap), cv2.COLORMAP_JET)
-overlay = cv2.addWeighted(image_rgb, 0.6, heatmap_color, 0.4, 0)
-bleed_overlay = cv2.bitwise_and(image_rgb, image_rgb, mask=bleeding_mask_combined)
-overlay[np.where(bleeding_mask_combined > 0)] = bleed_overlay[np.where(bleeding_mask_combined > 0)]
+heatmap_overlay = cv2.addWeighted(image_rgb, 0.6, heatmap_color, 0.4, 0)
 
 # === Save output masks ===
 cv2.imwrite(os.path.join(output_dir, "simclr_mask.png"), pred_bin)
@@ -367,10 +329,11 @@ plt.title("Predicted Mask (SimCLR-U-Net)" + (" (Failed)" if np.sum(pred_bin > 0)
 plt.axis('off')
 
 plt.subplot(1, 3, 3)
-plt.imshow(overlay)
+plt.imshow(heatmap_overlay)
 plt.title("Grad-CAM Activation" + (" (Failed)" if np.max(heatmap) == 0 else "") + (" - Bleeding Detected!" if bleeding_detected else ""))
 plt.axis('off')
 
 plt.tight_layout()
 plt.savefig(os.path.join(output_dir, "gradcam_mask_comparison.png"))
 print(f"Saved: {os.path.join(output_dir, 'gradcam_mask_comparison.png')}")
+plt.show()
