@@ -13,4 +13,4 @@ venv/
 /offline_results/
 /wounds/
 *.pth
-*.h5
+*.h5simclr_unet_wound_segmentation.keras
