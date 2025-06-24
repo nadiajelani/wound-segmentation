@@ -7,38 +7,38 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 # -------- Settings --------
-mask_path = "/Users/nadiajelani/Desktop/output/mask_output.png"
-scale_mm_per_pixel = 0.1
-scale_bar_length_mm = 10
+mask_path = "/Users/nadiajelani/projects/wound-segmentation/wound_progress_report/simclr_mask.png"
+scale_mm_per_pixel = 0.1  # Scale factor (mm per pixel)
+scale_bar_length_mm = 10  # Length of scale bar in mm
 report_dir = "/Users/nadiajelani/projects/wound-segmentation/wound_progress_report/"
 os.makedirs(report_dir, exist_ok=True)
 historical_csv = os.path.join(report_dir, "historical_report.csv")
 
 # -------- Load Historical Data --------
 historical_data = pd.read_csv(historical_csv) if os.path.exists(historical_csv) else pd.DataFrame(columns=[
-    "Date", "Image", "Wound Area (px²)", "Perimeter (px)", "Bounding Box", "Centroid", "Shape Irregularity", "Condition",
-    "Wound Area (mm²)", "Perimeter (mm)", "Instructions", "Disclaimer"])
+    "Date", "Image", "Wound Area (px²)", "Perimeter (px)", "Bounding Box", "Centroid", "Shape Irregularity", 
+    "Condition", "Wound Area (mm²)", "Perimeter (mm)", "Instructions", "Disclaimer"])
 
 # -------- Load and Process Mask --------
 mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
 if mask is None:
-    print(f"Error: Mask file {mask_path} not found.")
+    print(f"Error: Mask file {mask_path} not found or unreadable.")
     exit()
 _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
 contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
 if not contours:
-    print("No wound detected.")
+    print("No wound detected in the mask.")
     exit()
 
-cnt = max(contours, key=cv2.contourArea)
+cnt = max(contours, key=cv2.contourArea)  # Largest contour as the wound
 area = cv2.contourArea(cnt)
 perimeter = cv2.arcLength(cnt, True)
 x, y, w, h = cv2.boundingRect(cnt)
 M = cv2.moments(cnt)
-cx = int(M["m10"] / M["m00"]) if M["m00"] != 0 else 0
-cy = int(M["m01"] / M["m00"]) if M["m00"] != 0 else 0
-irregularity = (perimeter ** 2) / (4 * math.pi * area + 1e-6)
+cx = int(M["m10"] / M["m00"]) if M["m00"] != 0 else 0  # Centroid x
+cy = int(M["m01"] / M["m00"]) if M["m00"] != 0 else 0  # Centroid y
+irregularity = (perimeter ** 2) / (4 * math.pi * area + 1e-6)  # Shape irregularity (circularity inverse)
 
 # -------- Convert to Millimeters --------
 area_mm = area * (scale_mm_per_pixel ** 2)
@@ -74,22 +74,23 @@ original_path = mask_path.replace("mask_output.png", "original_image.jpg")
 original = cv2.imread(original_path)
 if original is None:
     print(f"Warning: Original image {original_path} not found, using mask for heatmap.")
-    gray = mask
+    gray = cv2.convertScaleAbs(mask, alpha=1.5)  # Enhance contrast for mask
 else:
     gray = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
-heatmap = cv2.applyColorMap(cv2.convertScaleAbs(gray, alpha=1.5), cv2.COLORMAP_JET)
-heatmap = cv2.bitwise_and(heatmap, heatmap, mask=thresh)
+    gray = cv2.convertScaleAbs(gray, alpha=1.5)  # Enhance contrast
+heatmap = cv2.applyColorMap(gray, cv2.COLORMAP_JET)  # Apply colormap
+heatmap = cv2.bitwise_and(heatmap, heatmap, mask=thresh)  # Apply mask to heatmap
 cv2.imwrite(os.path.join(report_dir, "wound_heatmap.png"), heatmap)
 print(f"Saved heatmap to {os.path.join(report_dir, 'wound_heatmap.png')}")
 
 # -------- Overlay Image with Scale and Heatmap --------
-overlay = cv2.addWeighted(original, 0.4, heatmap, 0.4, 0.0) if original is not None else cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-cv2.drawContours(overlay, [cnt], -1, (0, 255, 0), 2)
-cv2.circle(overlay, (cx, cy), 3, (255, 0, 0), -1)
+overlay = cv2.addWeighted(original, 0.4, heatmap, 0.6, 0.0) if original is not None else cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+cv2.drawContours(overlay, [cnt], -1, (0, 255, 0), 2)  # Green contour
+cv2.circle(overlay, (cx, cy), 3, (255, 0, 0), -1)  # Blue centroid
 scale_bar_px = int(scale_bar_length_mm / scale_mm_per_pixel)
 bar_start = (10, overlay.shape[0] - 20)
 bar_end = (10 + scale_bar_px, overlay.shape[0] - 20)
-cv2.line(overlay, bar_start, bar_end, (255, 255, 255), 3)
+cv2.line(overlay, bar_start, bar_end, (255, 255, 255), 3)  # White scale bar
 cv2.putText(overlay, f"{scale_bar_length_mm} mm", (bar_start[0], bar_start[1] - 10),
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 output_image_path = os.path.join(report_dir, "wound_combined_view.png")
@@ -97,6 +98,7 @@ cv2.imwrite(output_image_path, overlay)
 print(f"Saved combined view to {output_image_path}")
 
 # -------- Feature Analysis and Guided Instructions --------
+mask_bool = thresh.astype(bool)  # Define mask_bool for intensity analysis
 heatmap_gray = cv2.cvtColor(heatmap, cv2.COLOR_BGR2GRAY)
 max_intensity = np.max(heatmap_gray[mask_bool]) if mask_bool.any() else 0
 healing_stage = "Healing" if area < 3000 and irregularity < 1.5 else "Monitor" if area < 10000 else "At Risk"
