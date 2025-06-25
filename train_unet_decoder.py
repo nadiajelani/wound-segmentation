@@ -1,62 +1,44 @@
-# train_simclr_unet.py
+from tensorflow.keras import layers, models
+from tensorflow.keras.applications import ResNet50
 
-import os
-import tensorflow as tf
-import numpy as np
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from sklearn.model_selection import train_test_split
-from unet_decoder import build_simclr_unet
+def build_simclr_unet(input_shape=(224, 224, 3), num_classes=1, weights=None):
+    inputs = layers.Input(shape=input_shape)
 
-# === CONFIG ===
-IMG_HEIGHT = 224
-IMG_WIDTH = 224
-IMG_CHANNELS = 3
-IMAGE_DIR = "/Users/nadiajelani/Desktop/wounds-whisperer/wounds/u_net_images/train_images"
-MASK_DIR = "/Users/nadiajelani/Desktop/wounds-whisperer/wounds/u_net_images/train_masks"
+    # Encoder (ResNet50) with optional weights (e.g., 'imagenet')
+    base_model = ResNet50(include_top=False, weights=weights, input_tensor=inputs)
 
-# === Load and preprocess data ===
-def load_images_and_masks(image_dir, mask_dir, target_size=(IMG_HEIGHT, IMG_WIDTH)):
-    image_files = [f for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg'))]
-    images = []
-    masks = []
+    # Skip connections
+    skip1 = base_model.get_layer("conv1_relu").output
+    skip2 = base_model.get_layer("conv2_block3_out").output
+    skip3 = base_model.get_layer("conv3_block4_out").output
+    skip4 = base_model.get_layer("conv4_block6_out").output
+    bridge = base_model.get_layer("conv5_block3_out").output
 
-    for file in image_files:
-        img_path = os.path.join(image_dir, file)
-        mask_path = os.path.join(mask_dir, file)
-        if not os.path.exists(mask_path):
-            continue
+    # Decoder
+    x = layers.Conv2DTranspose(512, 3, strides=2, padding="same")(bridge)
+    x = layers.concatenate([x, skip4])
+    x = layers.Conv2D(512, 3, activation="relu", padding="same")(x)
+    x = layers.Conv2D(512, 3, activation="relu", padding="same")(x)
 
-        img = load_img(img_path, target_size=target_size)
-        mask = load_img(mask_path, target_size=target_size, color_mode='grayscale')
+    x = layers.Conv2DTranspose(256, 3, strides=2, padding="same")(x)
+    x = layers.concatenate([x, skip3])
+    x = layers.Conv2D(256, 3, activation="relu", padding="same")(x)
+    x = layers.Conv2D(256, 3, activation="relu", padding="same")(x)
 
-        img = img_to_array(img) / 255.0
-        mask = img_to_array(mask) / 255.0
-        mask = np.where(mask > 0.5, 1, 0)  # Binarize
+    x = layers.Conv2DTranspose(128, 3, strides=2, padding="same")(x)
+    x = layers.concatenate([x, skip2])
+    x = layers.Conv2D(128, 3, activation="relu", padding="same")(x)
+    x = layers.Conv2D(128, 3, activation="relu", padding="same")(x)
 
-        images.append(img)
-        masks.append(mask)
+    x = layers.Conv2DTranspose(64, 3, strides=2, padding="same")(x)
+    x = layers.concatenate([x, skip1])
+    x = layers.Conv2D(64, 3, activation="relu", padding="same")(x)
+    x = layers.Conv2D(64, 3, activation="relu", padding="same")(x)
 
-    return np.array(images), np.array(masks)
+    x = layers.Conv2DTranspose(32, 3, strides=2, padding="same")(x)
+    x = layers.Conv2D(32, 3, activation="relu", padding="same")(x)
 
-print("Loading data...")
-X, y = load_images_and_masks(IMAGE_DIR, MASK_DIR)
-print(f"Loaded {len(X)} image-mask pairs")
+    output_activation = "sigmoid" if num_classes == 1 else "softmax"
+    outputs = layers.Conv2D(num_classes, 1, activation=output_activation)(x)
 
-# === Split ===
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# === Build Model ===
-model = build_simclr_unet(input_shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-
-# === Train ===
-history = model.fit(
-    X_train, y_train,
-    validation_data=(X_val, y_val),
-    epochs=20,
-    batch_size=16
-)
-
-# === Save Model ===
-model.save("simclr_unet_wound_segmentation.keras")
-print("Model saved as 'simclr_unet_wound_segmentation.keras'")
+    return models.Model(inputs=inputs, outputs=outputs)
