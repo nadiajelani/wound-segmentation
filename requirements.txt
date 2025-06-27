@@ -12,3 +12,5 @@ opencv-python
 SimpleITK
 segmentation-models==1.0.1
 efficientnet==1.0.0
+tensorflow
+scikit-learn

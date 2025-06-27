@@ -3,7 +3,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras.utils import load_img, img_to_array
 from tensorflow.keras.models import load_model
 from PIL import Image, UnidentifiedImageError
@@ -130,26 +130,27 @@ except Exception as e:
     raise
 
 model.compile(
-    optimizer='adam',
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
     loss=combined_loss,
-    metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)]
+    metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)]  # Reverted to MeanIoU
 )
 
 # === RESUME TRAINING ===
-logger.info("Resuming training from epoch 7...")
-early_stopping = EarlyStopping(monitor='val_mean_io_u', patience=5, mode='max', restore_best_weights=True)
+logger.info("Resuming training from epoch 14...")
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, mode='min', restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6)
 checkpoint = ModelCheckpoint(
     MODEL_SAVE_PATH,
-    monitor='val_mean_io_u',
-    mode='max',
+    monitor='val_loss',
+    mode='min',
     save_best_only=True
 )
 history = model.fit(
     train_generator,
     validation_data=(X_val, y_val),
     epochs=EPOCHS,
-    initial_epoch=7,
-    callbacks=[early_stopping, checkpoint]
+    initial_epoch=39,
+    callbacks=[early_stopping, reduce_lr, checkpoint]
 )
 
 # === EVALUATE ON TEST SET ===
@@ -164,3 +165,26 @@ else:
 os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
 model.save(MODEL_SAVE_PATH)
 logger.info(f"✅ Model saved to {MODEL_SAVE_PATH}")
+
+# === VISUALIZE PREDICTIONS ===
+import matplotlib.pyplot as plt
+
+def visualize_predictions(model, X_test, y_test, num_samples=3):
+    predictions = model.predict(X_test[:num_samples])
+    predictions = (predictions > 0.5).astype(np.float32)
+    for i in range(num_samples):
+        plt.figure(figsize=(15, 5))
+        plt.subplot(1, 3, 1)
+        plt.imshow(X_test[i])
+        plt.title("Input Image")
+        plt.subplot(1, 3, 2)
+        plt.imshow(y_test[i, :, :, 0], cmap='gray')
+        plt.title("Ground Truth Mask")
+        plt.subplot(1, 3, 3)
+        plt.imshow(predictions[i, :, :, 0], cmap='gray')
+        plt.title("Predicted Mask")
+        plt.show()
+
+if len(X_test) > 0:
+    logger.info("Visualizing predictions...")
+    visualize_predictions(model, X_test, y_test)
