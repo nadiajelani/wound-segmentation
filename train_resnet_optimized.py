@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(m
 logger = logging.getLogger(__name__)
 
 # Enable mixed precision
-set_global_policy('mixed_float16')
+set_global_policy('float32')
 
 # Verify GPU
 gpus = tf.config.list_physical_devices('GPU')
@@ -54,7 +54,7 @@ def simclr_augmentation():
         shear_range=0.3,
         zoom_range=0.3,
         horizontal_flip=True,
-        brightness_range=[0.5, 1.5],
+        brightness_range=[0.8, 1.2],
         fill_mode='nearest'
     )
 
@@ -98,6 +98,7 @@ def add_simclr_augmentation(images):
     images = tf.image.random_brightness(images, max_delta=0.2)
     images = tf.image.random_contrast(images, lower=0.8, upper=1.2)
     images = tf.image.random_crop(images, size=[tf.shape(images)[0], IMG_HEIGHT, IMG_WIDTH, 3])
+    tf.debugging.check_numerics(images, "Augmented images contain NaN or Inf")
     return images
 
 @tf.function
@@ -106,24 +107,37 @@ def simclr_train_step(images, model, optimizer, temperature=0.1):
         # Create two augmented views
         view1 = add_simclr_augmentation(images)
         view2 = add_simclr_augmentation(images)
+
         h1 = model(view1, training=True)
         h2 = model(view2, training=True)
+
         # Normalize
         h1 = tf.math.l2_normalize(h1, axis=1)
         h2 = tf.math.l2_normalize(h2, axis=1)
+
         # Contrastive loss
         batch_size = tf.shape(h1)[0]
         labels = tf.range(batch_size)
-        masks = tf.one_hot(tf.range(batch_size), batch_size)
+
+        # Compute logits
         logits_aa = tf.matmul(h1, h1, transpose_b=True) / temperature
-        logits_aa = logits_aa - masks * 1e9
         logits_bb = tf.matmul(h2, h2, transpose_b=True) / temperature
-        logits_bb = logits_bb - masks * 1e9
         logits_ab = tf.matmul(h1, h2, transpose_b=True) / temperature
         logits_ba = tf.matmul(h2, h1, transpose_b=True) / temperature
+
+        # Create masks with correct dtype
+        masks = tf.one_hot(tf.range(batch_size), batch_size)
+        masks = tf.cast(masks, dtype=logits_aa.dtype)
+
+        # Subtract masks to zero-out self-similarity
+        logits_aa -= masks * 1e9
+        logits_bb -= masks * 1e9
+
         loss_a = tf.reduce_mean(tf.keras.losses.sparse_categorical_crossentropy(labels, logits_ab, from_logits=True))
         loss_b = tf.reduce_mean(tf.keras.losses.sparse_categorical_crossentropy(labels, logits_ba, from_logits=True))
         loss = (loss_a + loss_b) / 2
+        tf.debugging.check_numerics(logits_ab, "logits_ab contains NaN or Inf")
+
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     return loss
@@ -144,8 +158,8 @@ def train_step_simclr(images):
 logger.info("Starting SimCLR pretraining...")
 for epoch in range(PRETRAIN_EPOCHS):
     print(f"Pretraining Epoch {epoch + 1}/{PRETRAIN_EPOCHS}")
-    for images in all_dataset.batch(BATCH_SIZE).take(len(all_generator)):
-        loss = train_step_simclr(images)
+for images in all_dataset.take(len(all_generator)):
+    loss = train_step_simclr(images)
     logger.info(f"Pretraining Epoch {epoch + 1} loss: {loss:.4f}")
 pretrain_model.save('/Users/nadiajelani/projects/wound-segmentation/models/pretrained_base_model.keras')
 logger.info("Pretraining completed, model saved.")
