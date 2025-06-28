@@ -16,21 +16,28 @@ from tensorflow.keras.mixed_precision import set_global_policy
 set_global_policy('mixed_float16')
 
 # === Logging ===
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/Users/nadiajelani/projects/wound-segmentation/train.log'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # === Config ===
 IMG_SIZE = 224
-BATCH_SIZE = 32
-EPOCHS = 20
+BATCH_SIZE = 16  # Reduced for Apple M3
+EPOCHS = 30  # Increased for better convergence
 DATASET_PATH = '/Users/nadiajelani/Desktop/wounds-whisperer/wounds/dataset'
 TRAIN_DIR = os.path.join(DATASET_PATH, 'train')
 VAL_DIR = os.path.join(DATASET_PATH, 'validation')
 MODEL_SAVE_PATH = '/Users/nadiajelani/projects/wound-segmentation/models/wound_classifier.h5'
 CHECKPOINT_PATH = '/Users/nadiajelani/projects/wound-segmentation/models/checkpoint_{epoch:02d}.h5'
-CLASS_NAMES = ['non_wound', 'wound']
-EXPECTED_TRAIN_COUNTS = {'non_wound': 8012, 'wound': 12607}
-EXPECTED_VAL_COUNTS = {'non_wound': 2003, 'wound': 3152}
+CLASS_NAMES = ['non-wound', 'wound']
+EXPECTED_TRAIN_COUNTS = {'non-wound': 8012, 'wound': 13218}
+EXPECTED_VAL_COUNTS = {'non-wound': 2003, 'wound': 3305}
 
 # === Verify Directories ===
 os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
@@ -39,22 +46,17 @@ for dir_path in [TRAIN_DIR, VAL_DIR]:
         logger.error(f"Directory missing: {dir_path}")
         raise FileNotFoundError(f"Directory {dir_path} does not exist")
 
-# === Check Dataset Integrity (No Deletion) ===
-def check_dataset_integrity(directory, class_names=CLASS_NAMES, dry_run=True):
-    corrupted_files = []
-    total_files = 0
-    file_hashes = {}
-    file_names = set()
-    duplicates = []
-    subdirs = []
-    small_files = []
+# === Check Dataset Integrity ===
+def check_dataset_integrity(directory, class_names=CLASS_NAMES, expected_counts=None):
+    corrupted_files, duplicates, subdirs, small_files = [], [], [], []
+    file_hashes, file_names = {}, set()
     class_counts = {c: 0 for c in class_names}
     sample_files = {c: [] for c in class_names}
     expected_subdirs = [os.path.join(directory, c) for c in class_names]
     
     for subdir in expected_subdirs:
         if not os.path.exists(subdir):
-            logger.warning(f"⚠️ Expected subdirectory missing: {subdir}")
+            logger.warning(f"⚠️ Creating missing subdirectory: {subdir}")
             os.makedirs(subdir)
         else:
             logger.info(f"Found subdirectory: {subdir}")
@@ -63,10 +65,10 @@ def check_dataset_integrity(directory, class_names=CLASS_NAMES, dry_run=True):
         if root != directory and root not in expected_subdirs:
             subdirs.append(root)
         image_files = [f for f in files if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        total_files += len(image_files)
+        total_files = len(image_files)
         for class_name in class_names:
             if class_name in os.path.basename(root).lower():
-                class_counts[class_name] += len(image_files)
+                class_counts[class_name] += total_files
                 if len(sample_files[class_name]) < 5:
                     sample_files[class_name].extend([os.path.join(root, f) for f in image_files[:5-len(sample_files[class_name])]])
         for file_name in image_files:
@@ -90,49 +92,42 @@ def check_dataset_integrity(directory, class_names=CLASS_NAMES, dry_run=True):
                 logger.error(f"❌ Corrupted file: {file_path} - {e}")
                 corrupted_files.append(file_path)
     
-    logger.info(f"Total images in {directory}: {total_files}")
-    logger.info(f"Class counts in {directory}: {class_counts}")
+    logger.info(f"Total images in {directory}: {sum(class_counts.values())}")
+    logger.info(f"Class counts: {class_counts}")
     for class_name, files in sample_files.items():
         logger.info(f"Sample files for {class_name}: {files}")
-    if total_files == 0:
-        logger.error(f"❌ No images found in {directory}. Check directory structure and file extensions.")
-    
-    logger.info("Dry-run mode: No files will be modified or deleted.")
     if duplicates:
-        logger.warning(f"⚠️ Duplicates detected: {len(duplicates)} files")
+        logger.warning(f"⚠️ Duplicates: {len(duplicates)} files")
         for dup_path, reason in duplicates:
             logger.warning(f"Duplicate: {dup_path} ({reason})")
     if subdirs:
-        logger.warning(f"⚠️ Nested subdirs detected: {subdirs}")
+        logger.warning(f"⚠️ Nested subdirs: {subdirs}")
     if small_files:
-        logger.warning(f"⚠️ Small files (<1KB) detected: {len(small_files)} files")
+        logger.warning(f"⚠️ Small files (<1KB): {len(small_files)}")
     if corrupted_files:
-        logger.warning(f"⚠️ Corrupted files detected: {len(corrupted_files)} files")
+        logger.warning(f"⚠️ Corrupted files: {len(corrupted_files)}")
+    if expected_counts:
+        expected_total = sum(expected_counts.values())
+        if sum(class_counts.values()) != expected_total:
+            logger.warning(f"⚠️ Count mismatch: Expected {expected_total}, found {sum(class_counts.values())}")
+        for class_name, count in expected_counts.items():
+            if class_counts.get(class_name, 0) != count:
+                logger.warning(f"⚠️ {class_name} mismatch: Expected {count}, found {class_counts.get(class_name, 0)}")
     
-    return corrupted_files, total_files, duplicates, subdirs, small_files
+    return corrupted_files, duplicates, subdirs, small_files, class_counts
 
 logger.info("Checking dataset integrity...")
-train_corrupted, train_total, train_duplicates, train_subdirs, train_small = check_dataset_integrity(TRAIN_DIR)
-val_corrupted, val_total, val_duplicates, val_subdirs, val_small = check_dataset_integrity(VAL_DIR)
-
-# === Verify Expected Counts ===
-if train_total != sum(EXPECTED_TRAIN_COUNTS.values()) or val_total != sum(EXPECTED_VAL_COUNTS.values()):
-    logger.warning(f"⚠️ Dataset count mismatch. Expected {sum(EXPECTED_TRAIN_COUNTS.values())} train and {sum(EXPECTED_VAL_COUNTS.values())} validation images, but found {train_total} train and {val_total} validation.")
-for class_name, count in EXPECTED_TRAIN_COUNTS.items():
-    if class_counts.get(class_name, 0) != count:
-        logger.warning(f"⚠️ Train class {class_name} mismatch: expected {count}, found {class_counts.get(class_name, 0)}")
-for class_name, count in EXPECTED_VAL_COUNTS.items():
-    if class_counts.get(class_name, 0) != count:
-        logger.warning(f"⚠️ Validation class {class_name} mismatch: expected {count}, found {class_counts.get(class_name, 0)}")
+train_corrupted, train_duplicates, train_subdirs, train_small, train_class_counts = check_dataset_integrity(TRAIN_DIR, expected_counts=EXPECTED_TRAIN_COUNTS)
+val_corrupted, val_duplicates, val_subdirs, val_small, val_class_counts = check_dataset_integrity(VAL_DIR, expected_counts=EXPECTED_VAL_COUNTS)
 
 # === Data Generators ===
 train_datagen = ImageDataGenerator(
     rescale=1./255,
-    rotation_range=20,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    shear_range=0.2,
-    zoom_range=0.2,
+    rotation_range=30,  # Increased for diversity
+    width_shift_range=0.3,
+    height_shift_range=0.3,
+    shear_range=0.3,
+    zoom_range=0.3,
     horizontal_flip=True,
     vertical_flip=True,
     fill_mode='nearest'
@@ -140,7 +135,7 @@ train_datagen = ImageDataGenerator(
 val_datagen = ImageDataGenerator(rescale=1./255)
 
 try:
-    logger.info("Loading training data from %s", TRAIN_DIR)
+    logger.info(f"Loading training data from {TRAIN_DIR}")
     train_generator = train_datagen.flow_from_directory(
         TRAIN_DIR,
         target_size=(IMG_SIZE, IMG_SIZE),
@@ -149,7 +144,7 @@ try:
         classes=CLASS_NAMES,
         shuffle=True
     )
-    logger.info("Loading validation data from %s", VAL_DIR)
+    logger.info(f"Loading validation data from {VAL_DIR}")
     val_generator = val_datagen.flow_from_directory(
         VAL_DIR,
         target_size=(IMG_SIZE, IMG_SIZE),
@@ -159,27 +154,24 @@ try:
         shuffle=False
     )
 except Exception as e:
-    logger.error("Failed to load data: %s", str(e))
+    logger.error(f"❌ Failed to load data: {e}")
     raise
 
-logger.info(f"Found {train_generator.samples} training images and {val_generator.samples} validation images.")
-if train_generator.samples != train_total or val_generator.samples != val_total:
-    logger.warning(f"⚠️ Mismatch: flow_from_directory reports {train_generator.samples}/{val_generator.samples} images, but found {train_total}/{val_total} files.")
+logger.info(f"Found {train_generator.samples} training images, {val_generator.samples} validation images")
+if train_generator.samples != sum(train_class_counts.values()) or val_generator.samples != sum(val_class_counts.values()):
+    logger.warning(f"⚠️ Mismatch: flow_from_directory reports {train_generator.samples}/{val_generator.samples}, found {sum(train_class_counts.values())}/{sum(val_class_counts.values())}")
 logger.info(f"Class indices: {train_generator.class_indices}")
 
-# === Check if Training is Possible ===
+# === Check Training Feasibility ===
 if train_generator.samples == 0 or val_generator.samples == 0:
-    logger.error("❌ Cannot train: No images found. Please fix directory structure.")
-    raise ValueError("No images found in training or validation set.")
+    logger.error("❌ Cannot train: No images found")
+    raise ValueError("No images found")
 
 # === Class Weights ===
-if train_generator.samples > 0:
-    class_totals = np.bincount(train_generator.classes)
-    total = class_totals.sum()
-    class_weights = {i: total / (2 * count) for i, count in enumerate(class_totals) if count > 0}
-    logger.info(f"Class counts: {class_totals}")
-else:
-    class_weights = {0: 1.0, 1: 1.0}
+class_totals = np.bincount(train_generator.classes)
+total = class_totals.sum()
+class_weights = {i: total / (2 * count) for i, count in enumerate(class_totals) if count > 0}
+logger.info(f"Class counts: {class_totals}")
 logger.info(f"Class weights: {class_weights}")
 
 # === Visualize Sample Images ===
@@ -203,16 +195,14 @@ def visualize_sample_images(generator, directory, num_samples=3):
         return [], []
 
 if train_generator.samples > 0 and val_generator.samples > 0:
-    logger.info("Visualize sample images before training? (y/n)")
+    logger.info("Visualize sample images? (y/n)")
     if input().lower() == 'y':
-        logger.info("Visualizing sample training images...")
+        logger.info("Visualizing training images...")
         train_files, train_labels = visualize_sample_images(train_generator, TRAIN_DIR)
-        logger.info(f"Sample training files: {train_files}")
-        logger.info(f"Sample training labels: {train_labels}")
-        logger.info("Visualizing sample validation images...")
+        logger.info(f"Training samples: {train_files} ({train_labels})")
+        logger.info("Visualizing validation images...")
         val_files, val_labels = visualize_sample_images(val_generator, VAL_DIR)
-        logger.info(f"Sample validation files: {val_files}")
-        logger.info(f"Sample validation labels: {val_labels}")
+        logger.info(f"Validation samples: {val_files} ({val_labels})")
 
 # === Model ===
 base_model = tf.keras.applications.ResNet50(
@@ -220,7 +210,11 @@ base_model = tf.keras.applications.ResNet50(
     weights='imagenet',
     input_shape=(IMG_SIZE, IMG_SIZE, 3)
 )
-base_model.trainable = False
+# Unfreeze later layers for fine-tuning
+base_model.trainable = True
+for layer in base_model.layers[:100]:  # Freeze first 100 layers
+    layer.trainable = False
+
 x = tf.keras.layers.GlobalAveragePooling2D()(base_model.output)
 x = tf.keras.layers.Dense(512, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.0001))(x)
 x = tf.keras.layers.Dropout(0.5)(x)
@@ -236,12 +230,12 @@ try:
         model.load_weights(latest_checkpoint)
         logger.info(f"✅ Loaded checkpoint: {latest_checkpoint}")
     else:
-        logger.info("No checkpoint found, starting from scratch.")
+        logger.info("No checkpoint found")
 except Exception as e:
     logger.warning(f"⚠️ Failed to load checkpoint: {e}")
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(1e-4, clipnorm=1.0),
+    optimizer=tf.keras.optimizers.Adam(1e-5, clipnorm=1.0),  # Lower LR for fine-tuning
     loss='binary_crossentropy',
     metrics=['accuracy', tf.keras.metrics.AUC(name='auc'), tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
 )
@@ -255,7 +249,7 @@ class ConfusionMatrixCallback(Callback):
         self.val_gen.reset()
         y_true, y_pred = [], []
         try:
-            steps = min(len(self.val_gen), 100)  # Limit to avoid memory issues
+            steps = min(len(self.val_gen), 100)
             for _ in range(steps):
                 x, y = next(self.val_gen)
                 pred = self.model.predict(x, verbose=0)
@@ -275,8 +269,8 @@ class ConfusionMatrixCallback(Callback):
 
 callbacks = [
     ModelCheckpoint(CHECKPOINT_PATH, save_best_only=True, monitor='val_auc', mode='max', verbose=1),
-    EarlyStopping(monitor='val_auc', patience=5, mode='max', restore_best_weights=True, verbose=1),
-    ReduceLROnPlateau(monitor='val_auc', patience=3, factor=0.3, verbose=1),
+    EarlyStopping(monitor='val_auc', patience=7, mode='max', restore_best_weights=True, verbose=1),
+    ReduceLROnPlateau(monitor='val_auc', patience=3, factor=0.2, min_lr=1e-6, verbose=1),
     ConfusionMatrixCallback(val_generator)
 ]
 
