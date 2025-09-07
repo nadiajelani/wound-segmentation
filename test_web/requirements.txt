@@ -1,0 +1,16 @@
+numpy==1.24.4
+tensorflow-macos==2.16.2
+tensorflow-metal==1.2.0
+torch==2.6.0
+torchaudio==2.6.0
+monai==1.4.0
+kornia==0.8.0
+matplotlib
+scikit-learn
+pillow
+opencv-python
+SimpleITK
+segmentation-models==1.0.1
+efficientnet==1.0.0
+tensorflow
+scikit-learn
