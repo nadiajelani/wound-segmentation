@@ -1,0 +1,90 @@
+@startuml
+title Wound MedSAM Main Logic Flows (wound_medsam.py)
+
+start
+if (Run mode?) then (Single image)
+  :Parse CLI args (--analyze_image, --pretrained_model_path,
+   --use_medsam, --medsam_model_path, --output_dir,
+   --patient_metadata, --verbose);
+  :Build U-Net (build_unet);
+  :Load U-Net weights (model.load_weights);
+  if (use_medsam and path provided?) then (yes)
+    :load_medsam_model(checkpoint_path);
+  endif
+  :Read image (cv2.imread -> RGB);
+  :Create float [0,1] and uint8 copies;
+  :Resize to 128x128 (tf.image.resize);
+  :Predict U-Net mask (model.predict -> >0.5);
+  if (MedSAM available?) then (yes)
+    :medsam_segment(image_uint8) -> mask;
+    :Resize MedSAM mask to 128x128;
+    :combine_masks(union) -> hybrid_mask;
+  else
+    :hybrid_mask = unet_mask;
+  endif
+  :Resize hybrid_mask back to original image size;
+  :predict_healing_potential(hybrid_mask, image, patient) -> severity, healing;
+  :validation_result = "skipped" (single-image mode);
+  :generate_clinical_report(image, hybrid_mask, severity, healing, validation) -> PDF;
+  :feature_extraction(Canny/Sobel);
+  :explainable_ai (Grad-CAM-like);
+  :visualize_results(...);
+  stop
+else (Train/Evaluate)
+  :Parse CLI args (train/test dirs, img_size, batch, epochs,
+   use_medsam, use_medsam_fallback, hybrid_mode,
+   combination_method, model paths, output_dir,
+   patient_metadata, image_mode, verbose);
+  if (use_medsam?) then (yes)
+    :load_medsam_model(checkpoint_path);
+    if (have train dirs?) then (yes)
+      :load_data(train_image_dir, train_mask_dir, mode=image_mode);
+      :fine_tune_medsam(X_train, y_train);
+    endif
+  endif
+  if (use_medsam_fallback?) then (yes)
+    :load_data_with_medsam_fallback(test_image_dir, test_mask_dir);
+  else
+    :load_data(test_image_dir, test_mask_dir, mode=image_mode);
+  endif
+  if (have pretrained U-Net?) then (yes)
+    :Skip training dataset prep;
+  else
+    :Ensure train dirs exist;
+    :load_data(train_image_dir, train_mask_dir, mode=image_mode);
+    :train_test_split -> X_train, X_val, y_train, y_val;
+  endif
+  :KFold train_model(X_train, y_train, X_val, y_val) -> models[];
+  :adversarial_training(models[i], X_train, y_train) for each model;
+  :evaluate_model(models[0], X_test, y_test);
+  :calibrate_model(models[0], X_test, y_test) -> calibrator;
+  fork
+    :Loop over test batches (evaluate_and_visualize);
+    :Resize to 128x128;
+    :For each model -> TTA predict; average predictions;
+    :Apply calibrator; resize back to original size;
+    if (use_medsam?) then (yes)
+      :medsam_segment(orig_img);
+      if (hybrid_mode?) then (yes)
+        :combine_masks(method=union|intersection|average);
+      else
+        :hybrid_mask = pred_mask;
+      endif
+    endif
+    :feature_extraction(Canny/Sobel);
+    :explainable_ai(Grad-CAM-like);
+    :explain_with_shap(SHAP values);
+    :predict_healing_potential(hybrid_mask, image, patient);
+    :validate_segmentation(true_mask, hybrid_mask) -> IoU + message;
+    :generate_clinical_report(...);
+    :estimate_uncertainty (variance over samples);
+    :visualize_results(...);
+    :Append to error_log if IoU < 0.5;
+  end fork
+  :Write error_log.json;
+  stop
+endif
+@enduml
+
+
+
