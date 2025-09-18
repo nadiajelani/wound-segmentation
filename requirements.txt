@@ -1,16 +1,26 @@
-numpy==1.24.4
-tensorflow-macos==2.16.2
-tensorflow-metal==1.2.0
-torch==2.6.0
-torchaudio==2.6.0
-monai==1.4.0
-kornia==0.8.0
-matplotlib
-scikit-learn
-pillow
-opencv-python
-SimpleITK
-segmentation-models==1.0.1
-efficientnet==1.0.0
-tensorflow
-scikit-learn
+# Core dependencies for woundseg package
+numpy>=1.21.0
+opencv-python>=4.5.0
+tensorflow>=2.8.0
+torch>=1.12.0
+torchvision>=0.13.0
+Pillow>=8.3.0
+matplotlib>=3.5.0
+scikit-learn>=1.0.0
+scikit-image>=0.19.0
+albumentations>=1.2.0
+fpdf2>=2.5.0
+tqdm>=4.64.0
+tenacity>=8.0.0
+typer>=0.6.0
+rich>=12.0.0
+python-dotenv>=0.19.0
+
+# Web application dependencies
+flask>=2.0.0
+flask-cors>=3.0.0
+gtts>=2.2.0
+python-multipart>=0.0.9
+
+# AWS dependencies
+boto3>=1.26.0
