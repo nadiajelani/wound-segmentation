@@ -21,7 +21,10 @@ CORS(app)  # Enable CORS for all routes
 UPLOAD_FOLDER = "uploads"
 REPORT_FOLDER = "reports"
 VOICE_FOLDER = "voice_summaries"
-MODEL_PATH = "/Users/nadiajelani/Desktop/Medical Pics/wound-segmentation/models/best_unet_wound_model.h5"
+# Import configuration
+from woundseg.config import Config
+
+MODEL_PATH = Config.get_model_path("unet")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORT_FOLDER, exist_ok=True)

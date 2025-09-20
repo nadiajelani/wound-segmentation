@@ -16,11 +16,14 @@ from torchvision import transforms
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+# Import configuration
+from woundseg.config import Config
+
 # Configuration
-MODEL_DIR = '/Users/nadiajelani/projects/wound-segmentation/models'
-CLASSIFIER_PATH = os.path.join(MODEL_DIR, 'wound_classifier.h5')  # ResNet50
-UNET_PATH = os.path.join(MODEL_DIR, 'best_unet_wound_model.h5')  # U-Net
-MEDSAM_PATH = os.path.join(MODEL_DIR, 'best_medsam_wound_model.pth')  # MedSAM
+MODEL_DIR = Config.MODELS_DIR
+CLASSIFIER_PATH = Config.get_model_path("classifier")  # ResNet50
+UNET_PATH = Config.get_model_path("unet")  # U-Net
+MEDSAM_PATH = Config.get_model_path("medsam")  # MedSAM
 IMG_HEIGHT, IMG_WIDTH = 224, 224
 UNET_INPUT_SIZE = (256, 256)  # Common U-Net input size
 MEDSAM_INPUT_SIZE = (1024, 1024)  # Typical MedSAM input size

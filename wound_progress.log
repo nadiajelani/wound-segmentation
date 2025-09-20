@@ -4,3 +4,21 @@
 2025-09-20 12:52:29,520 - INFO: Segmentation heatmap saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_heatmap.png
 2025-09-20 12:52:29,554 - INFO: PDF report saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_report.pdf
 2025-09-20 12:52:29,554 - INFO: Done. See your report for wound details and advice.
+2025-09-20 13:08:31,625 - INFO: Loaded segmentation model from /Users/nadiajelani/projects/wound-segmentation/models/simclr_unet_patch_wound.keras
+2025-09-20 13:08:41,909 - INFO: Saved mask at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/simclr_mask.png
+2025-09-20 13:08:41,914 - INFO: Overlay image saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_overlay.png
+2025-09-20 13:08:41,920 - INFO: Segmentation heatmap saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_heatmap.png
+2025-09-20 13:08:42,024 - INFO: Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2025-09-20 13:08:42,025 - INFO: Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2025-09-20 13:08:42,056 - INFO: Wound area trend plot saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_area_trend.png
+2025-09-20 13:08:42,086 - INFO: PDF report saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_report.pdf
+2025-09-20 13:08:42,086 - INFO: Done. See your report for wound details and advice.
+2025-09-20 13:20:36,387 - INFO: Loaded segmentation model from /Users/nadiajelani/projects/wound-segmentation/models/simclr_unet_patch_wound.keras
+2025-09-20 13:20:42,197 - INFO: Saved mask at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/simclr_mask.png
+2025-09-20 13:20:42,199 - INFO: Overlay image saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_overlay.png
+2025-09-20 13:20:42,201 - INFO: Segmentation heatmap saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_heatmap.png
+2025-09-20 13:20:42,244 - INFO: Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2025-09-20 13:20:42,244 - INFO: Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2025-09-20 13:20:42,274 - INFO: Wound area trend plot saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_area_trend.png
+2025-09-20 13:20:42,303 - INFO: PDF report saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_report.pdf
+2025-09-20 13:20:42,303 - INFO: Done. See your report for wound details and advice.

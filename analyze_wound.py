@@ -13,6 +13,7 @@ import json
 import base64
 import uuid
 from datetime import datetime
+from typing import Optional, Dict, Any, Tuple
 from wound_medsam import build_unet, predict_healing_potential, load_medsam_model, medsam_segment
 
 app = Flask(__name__)
@@ -23,13 +24,16 @@ REPORT_FOLDER = "reports"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORT_FOLDER, exist_ok=True)
 
-UNET_MODEL_PATH = "/Users/nadiajelani/projects/wound-segmentation/models/best_unet_wound_model.h5"
-MEDSAM_MODEL_PATH = "/Users/nadiajelani/projects/wound-segmentation/models/best_medsam_model.pth"
+# Import configuration
+from woundseg.config import Config
+
+UNET_MODEL_PATH = Config.get_model_path("unet")
+MEDSAM_MODEL_PATH = Config.get_model_path("medsam")
 
 model = build_unet(input_shape=(128, 128, 3))
 model.load_weights(UNET_MODEL_PATH)
 
-def create_visualization(image, pred_mask, output_path):
+def create_visualization(image: np.ndarray, pred_mask: np.ndarray, output_path: str) -> None:
     img_rgb = (image * 255).astype(np.uint8) if image.max() <= 1.0 else image.copy()
     contours, _ = cv2.findContours(pred_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contour_img = img_rgb.copy()
