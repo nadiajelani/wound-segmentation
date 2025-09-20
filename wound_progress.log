@@ -1,0 +1,6 @@
+2025-09-20 12:52:24,484 - INFO: Loaded segmentation model from /Users/nadiajelani/projects/wound-segmentation/models/simclr_unet_patch_wound.keras
+2025-09-20 12:52:29,510 - INFO: Saved mask at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/simclr_mask.png
+2025-09-20 12:52:29,514 - INFO: Overlay image saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_overlay.png
+2025-09-20 12:52:29,520 - INFO: Segmentation heatmap saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_heatmap.png
+2025-09-20 12:52:29,554 - INFO: PDF report saved at /Users/nadiajelani/projects/wound-segmentation/wound_progress_report/wound_report.pdf
+2025-09-20 12:52:29,554 - INFO: Done. See your report for wound details and advice.
