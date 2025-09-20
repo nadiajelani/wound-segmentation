@@ -56,7 +56,15 @@ def create_visualization(image: np.ndarray, pred_mask: np.ndarray, output_path: 
     plt.savefig(output_path, dpi=150)
     plt.close()
 
-def generate_patient_report(image, pred_mask, patient_info, severity, healing_potential, wound_area_mm2, output_dir):
+def generate_patient_report(
+    image: np.ndarray, 
+    pred_mask: np.ndarray, 
+    patient_info: Dict[str, Any], 
+    severity: str, 
+    healing_potential: str, 
+    wound_area_mm2: float, 
+    output_dir: str
+) -> str:
     os.makedirs(output_dir, exist_ok=True)
     # Check write permissions
     if not os.access(output_dir, os.W_OK):
@@ -104,7 +112,13 @@ def generate_patient_report(image, pred_mask, patient_info, severity, healing_po
     pdf.output(report_path)
     return report_path, vis_path
 
-def analyze_image(image_path, unet_model_path, medsam_model_path, patient_info, output_dir='analysis_output'):
+def analyze_image(
+    image_path: str, 
+    unet_model_path: str, 
+    medsam_model_path: str, 
+    patient_info: Dict[str, Any], 
+    output_dir: str = 'analysis_output'
+) -> Tuple[str, str, str, str, float]:
     os.makedirs(output_dir, exist_ok=True)
 
     # Load image
@@ -158,12 +172,12 @@ def analyze_image(image_path, unet_model_path, medsam_model_path, patient_info, 
     return report_path, vis_path
 
 @app.route("/report/<filename>")
-def serve_report(filename):
+def serve_report(filename: str):
     return send_from_directory(REPORT_FOLDER, filename)
 
 @app.route("/upload", methods=["POST"])
 @app.route("/upload", methods=["POST"])
-def upload():
+def upload() -> Dict[str, Any]:
     try:
         if "image" not in request.files:
             raise ValueError("No image file provided in the request")

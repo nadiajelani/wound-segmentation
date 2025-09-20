@@ -13,6 +13,7 @@ import tensorflow as tf
 from fpdf import FPDF
 from gtts import gTTS
 from wound_segmentation import build_unet, predict_healing_potential
+from typing import Dict, Any, Optional, Tuple
 
 # Flask setup
 app = Flask(__name__, template_folder='.')
@@ -39,15 +40,15 @@ def home():
     return render_template("process_image.html")
 
 @app.route("/voice/<filename>")
-def serve_voice(filename):
+def serve_voice(filename: str):
     return send_from_directory(VOICE_FOLDER, filename)
 
 @app.route("/report/<filename>")
-def serve_report(filename):
+def serve_report(filename: str):
     return send_from_directory(REPORT_FOLDER, filename)
 
 @app.route("/upload", methods=["POST"])
-def upload():
+def upload() -> Tuple[Dict[str, Any], int]:
     try:
         # Check if image was uploaded
         if "image" not in request.files:

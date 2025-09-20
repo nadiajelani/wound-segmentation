@@ -11,6 +11,7 @@ from datetime import datetime
 import cv2
 import torch
 from torchvision import transforms
+from typing import Optional, Tuple, Dict, Any
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
@@ -50,7 +51,7 @@ except Exception as e:
     logger.error("Failed to load models: %s", str(e))
     raise
 
-def preprocess_image(image_path, target_size=(IMG_HEIGHT, IMG_WIDTH)):
+def preprocess_image(image_path: str, target_size: Tuple[int, int] = (IMG_HEIGHT, IMG_WIDTH)) -> np.ndarray:
     """Preprocess the image for classification or segmentation."""
     try:
         img = load_img(image_path, target_size=target_size)
@@ -68,11 +69,11 @@ def classify_image(model, img_array):
     confidence = prediction[0][0] if is_wound else 1 - prediction[0][0]
     return is_wound, confidence
 
-def torch_to_tf_tensor(torch_tensor):
+def torch_to_tf_tensor(torch_tensor: torch.Tensor) -> tf.Tensor:
     """Convert PyTorch tensor to TensorFlow tensor."""
     return tf.convert_to_tensor(torch_tensor.numpy(), dtype=tf.float32)
 
-def segment_wound(unet_model, medsam_model, img_array):
+def segment_wound(unet_model: tf.keras.Model, medsam_model: torch.nn.Module, img_array: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Segment the wound using U-Net and MedSAM."""
     # U-Net segmentation
     img_unet = tf.image.resize(img_array[0], UNET_INPUT_SIZE)
@@ -95,7 +96,7 @@ def segment_wound(unet_model, medsam_model, img_array):
     combined_mask = (combined_mask > 0.5).astype(np.uint8)
     return combined_mask
 
-def save_results(image_path, is_wound, confidence, mask=None):
+def save_results(image_path: str, is_wound: bool, confidence: float, mask: Optional[np.ndarray] = None) -> None:
     """Save classification and segmentation results."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -114,7 +115,7 @@ def save_results(image_path, is_wound, confidence, mask=None):
         plt.imsave(os.path.join(output_dir, f'{base_name}_mask_{timestamp}.png'), mask_resized, cmap='gray')
         logger.info("Saved segmentation mask to %s", os.path.join(output_dir, f'{base_name}_mask_{timestamp}.png'))
 
-def process_image(image_path):
+def process_image(image_path: str) -> Tuple[bool, float, Optional[np.ndarray]]:
     """Process the uploaded or captured image."""
     img_array = preprocess_image(image_path)
     if img_array is None:
@@ -136,13 +137,13 @@ def process_image(image_path):
     else:
         save_results(image_path, is_wound, confidence)
 
-def upload_image():
+def upload_image() -> None:
     """Handle image upload via GUI."""
     file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp")])
     if file_path:
         process_image(file_path)
 
-def capture_image():
+def capture_image() -> None:
     """Handle image capture (placeholder for webcam)."""
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
