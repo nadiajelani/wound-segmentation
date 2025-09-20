@@ -82,4 +82,124 @@ cli/
 - Mixed precision and device selection applied centrally via config.
 - Unit tests pass locally; lint clean.
 
+---
+
+## Progress Tracking
+
+### Status Legend
+- ✅ **Completed** - Task finished and tested
+- 🚧 **In Progress** - Currently being worked on
+- ⏳ **Pending** - Not started yet
+- ❌ **Blocked** - Cannot proceed due to dependencies
+- 🔄 **Needs Review** - Completed but needs verification
+
+### Implementation Progress
+
+#### 1) Config and Constants
+- [ ] ⏳ Create `woundseg/config.py` with env-driven settings
+- [ ] ⏳ Add `.env.example` with documented usage
+- [ ] ⏳ Set mixed-precision and TF threading configuration
+- [ ] ⏳ Remove all hardcoded absolute paths from existing files
+
+**Files to modify:** `wound_medsam.py`, `analyze_wound.py`, `app.py`, `wound_checker.py`
+
+#### 2) Types and Contracts
+- [ ] ⏳ Create `woundseg/types.py` with dataclasses
+- [ ] ⏳ Define `Patient`, `AnalysisOptions`, `AnalysisResult`, `Artifacts` models
+- [ ] ⏳ Add type hints throughout the codebase
+
+#### 3) Model Providers
+- [ ] ⏳ Create `woundseg/models/provider.py` with lazy singletons
+- [ ] ⏳ Migrate U-Net build/load from `wound_medsam.py` to `models/unet.py`
+- [ ] ⏳ Migrate MedSAM load from `wound_medsam.py` to `models/medsam.py`
+- [ ] ⏳ Create `models/keras_custom.py` for custom objects registration
+- [ ] ⏳ Implement device selection logic (CPU/GPU/MPS)
+
+#### 4) Pipelines
+- [ ] ⏳ Extract preprocessing logic to `pipelines/preprocess.py`
+- [ ] ⏳ Extract segmentation logic to `pipelines/segment.py`
+- [ ] ⏳ Extract postprocessing logic to `pipelines/postprocess.py`
+- [ ] ⏳ Create orchestration in `pipelines/analyze.py`
+- [ ] ⏳ Implement TTA, combine_masks, uncertainty estimation
+
+#### 5) Services
+- [ ] ⏳ Create `services/reporting.py` for PDF generation
+- [ ] ⏳ Create `services/validation.py` for image QA and IoU validation
+- [ ] ⏳ Create `services/explain.py` for Grad-CAM and SHAP
+- [ ] ⏳ Create `services/storage.py` for filesystem abstraction
+- [ ] ⏳ Create `services/voice.py` for gTTS wrapper
+
+#### 6) CLI
+- [ ] ⏳ Create `cli/ws_cli.py` with Typer commands
+- [ ] ⏳ Implement `analyze` command with all options
+- [ ] ⏳ Implement `train-unet` and `train-classifier` commands
+- [ ] ⏳ Add help documentation and examples
+
+#### 7) Refactor Existing Scripts
+- [ ] ⏳ Update `analyze_wound.py` to use package APIs
+- [ ] ⏳ Update `app.py` to use package APIs
+- [ ] ⏳ Update `wound_checker.py` to use package APIs
+- [ ] ⏳ Move training code to `training/` modules
+
+#### 8) Logging and Errors
+- [ ] ⏳ Create `woundseg/logging.py` with structured logging
+- [ ] ⏳ Create `utils/exceptions.py` with domain-specific exceptions
+- [ ] ⏳ Replace all print statements with proper logging
+- [ ] ⏳ Replace broad except blocks with specific error handling
+
+#### 9) Optional Extras
+- [ ] ⏳ Create `training/synthetic.py` for Stable Diffusion
+- [ ] ⏳ Implement feature flags for explainability
+- [ ] ⏳ Add MedSAM feature flag implementation
+
+#### 10) Testing
+- [ ] ⏳ Create `tests/` directory structure
+- [ ] ⏳ Add unit tests for preprocessing functions
+- [ ] ⏳ Add unit tests for segmentation functions
+- [ ] ⏳ Add unit tests for validation functions
+- [ ] ⏳ Add unit tests for reporting functions
+- [ ] ⏳ Add golden image tests for deterministic outputs
+- [ ] ⏳ Set up test fixtures and mock data
+
+#### 11) Packaging
+- [ ] ⏳ Create `pyproject.toml` with project metadata
+- [ ] ⏳ Generate `requirements.txt` with pinned versions
+- [ ] ⏳ Generate `requirements-train.txt` for training extras
+- [ ] ⏳ Test local installation with `pip install -e .`
+
+### File Migration Map
+
+| Current File | New Location | Status |
+|--------------|--------------|---------|
+| `wound_medsam.py` | `woundseg/models/`, `woundseg/pipelines/`, `woundseg/services/` | ⏳ |
+| `analyze_wound.py` | Updated to use `woundseg` package | ⏳ |
+| `app.py` | Updated to use `woundseg` package | ⏳ |
+| `wound_checker.py` | Updated to use `woundseg` package | ⏳ |
+| Training scripts | `woundseg/training/` | ⏳ |
+
+### Dependencies to Resolve
+- [ ] ⏳ Identify all hardcoded paths in existing files
+- [ ] ⏳ Map model loading locations
+- [ ] ⏳ Document current Flask app differences
+- [ ] ⏳ List all custom Keras objects that need registration
+
+### Testing Checklist
+- [ ] ⏳ CLI command works: `ws analyze --image sample.jpg`
+- [ ] ⏳ No absolute paths in any file
+- [ ] ⏳ Environment config works on different machine
+- [ ] ⏳ U-Net weights load via provider singleton
+- [ ] ⏳ MedSAM optional behind feature flag
+- [ ] ⏳ Mixed precision applied centrally
+- [ ] ⏳ All unit tests pass
+- [ ] ⏳ Code passes linting
+
+### Notes and Issues
+*Add notes about blockers, decisions made, or issues encountered during implementation*
+
+---
+
+**Last Updated:** [Date]
+**Current Phase:** Phase 1 - Modularization
+**Next Milestone:** Complete config and types setup
+
 
