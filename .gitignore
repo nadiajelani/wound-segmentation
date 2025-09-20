@@ -14,3 +14,5 @@ venv/
 /wounds/
 *.pth
 *.h5simclr_unet_wound_segmentation.keras
+*.h5
+*.keras
