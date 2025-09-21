@@ -36,11 +36,11 @@ cli/
    - Register Keras custom objects in `models/keras_custom.py` (FocalTverskyLoss, IOUScore) only once.
 
 4) Pipelines
-   - Extract from `wound_medsam.py`:
-     - `advanced_augmentation`, loaders → `pipelines/preprocess.py`
-     - segmentation helpers (TTA, combine_masks, uncertainty) → `pipelines/segment.py`
-     - resize-back + feature extraction → `pipelines/postprocess.py`
-     - orchestration (`analyze_single_image`, batch evaluation loop) → `pipelines/analyze.py`
+   - Reorganize existing functionality from Stage 3 into separate pipeline components:
+     - Move preprocessing logic from `ModelProvider` → `pipelines/preprocess.py`
+     - Move segmentation logic from `ModelProvider` → `pipelines/segment.py`
+     - Move postprocessing logic from scattered functions → `pipelines/postprocess.py`
+     - Create orchestration wrapper (`pipelines/analyze.py`) that coordinates the pipeline components
 
 5) Services
    - `services/reporting.py`: PDF generation (patient + clinician variants).
@@ -145,11 +145,18 @@ cli/
 - Model benchmarking and device switching capabilities
 
 #### 4) Pipelines
-- [ ] ⏳ Extract preprocessing logic to `pipelines/preprocess.py`
-- [ ] ⏳ Extract segmentation logic to `pipelines/segment.py`
-- [ ] ⏳ Extract postprocessing logic to `pipelines/postprocess.py`
-- [ ] ⏳ Create orchestration in `pipelines/analyze.py`
-- [ ] ⏳ Implement TTA, combine_masks, uncertainty estimation
+- [x] ✅ Reorganize preprocessing logic from `ModelProvider` to `pipelines/preprocess.py`
+- [x] ✅ Reorganize segmentation logic from `ModelProvider` to `pipelines/segment.py`
+- [x] ✅ Reorganize postprocessing logic to `pipelines/postprocess.py`
+- [x] ✅ Create orchestration wrapper in `pipelines/analyze.py`
+- [x] ✅ Implement TTA, combine_masks, uncertainty estimation (reorganized from Stage 3)
+
+**Status:** ✅ **COMPLETED** - Pipeline reorganization implemented with:
+- **Code reorganization** from Stage 3's `ModelProvider` into separate pipeline components
+- **Separation of concerns** with dedicated classes for each pipeline stage
+- **Orchestration wrapper** (`AnalysisPipeline`) that coordinates all components
+- **No new functionality** - purely organizational refactoring of existing capabilities
+- **Same underlying logic** as Stage 3, just better organized
 
 #### 5) Services
 - [ ] ⏳ Create `services/reporting.py` for PDF generation
@@ -224,22 +231,25 @@ cli/
 
 ### Notes and Issues
 
-#### ✅ **Completed (Step 1)**
-- **Package Structure**: Created complete `woundseg/` package with all subdirectories
-- **Configuration System**: Implemented comprehensive config management with environment variables
-- **Type System**: Created full type definitions with validation and dataclasses
-- **Environment Template**: Created `env.template` with all configuration options
-- **Testing**: Verified config and types import and work correctly
-- **Hardcoded Paths Removed**: Updated `analyze_wound.py`, `app.py`, `wound_checker.py` to use `Config.get_model_path()`
+#### ✅ **Completed (Steps 1-4)**
+- **Step 1 - Package Structure**: Created complete `woundseg/` package with all subdirectories
+- **Step 1 - Configuration System**: Implemented comprehensive config management with environment variables
+- **Step 1 - Type System**: Created full type definitions with validation and dataclasses
+- **Step 1 - Environment Template**: Created `env.template` with all configuration options
+- **Step 1 - Hardcoded Paths Removed**: Updated `analyze_wound.py`, `app.py`, `wound_checker.py` to use `Config.get_model_path()`
+- **Step 2 - Type Hints**: Added type hints throughout existing codebase
+- **Step 3 - Model Providers**: Implemented `ModelProvider` with U-Net and classifier management
+- **Step 3 - U-Net Management**: Created `UNetProvider` with model loading and prediction
+- **Step 3 - Custom Objects**: Registered Keras custom objects (FocalTverskyLoss, IOUScore, DiceScore)
+- **Step 4 - Pipeline Reorganization**: Reorganized Stage 3 functionality into separate pipeline components
+- **Step 4 - Separation of Concerns**: Created dedicated classes for preprocessing, segmentation, postprocessing
+- **Step 4 - Orchestration**: Created `AnalysisPipeline` wrapper for coordinating all components
 
-#### 🔄 **In Progress (Step 2)**
-- **Type Hints**: Adding type hints throughout existing codebase (started with `analyze_wound.py`)
-
-#### 📋 **Next Steps (Step 2 → Step 3)**
-- Complete type hints in remaining key files
-- Begin Step 3: Model Providers
-- Create model provider singletons
-- Migrate U-Net and MedSAM loading logic
+#### 📋 **Next Steps (Step 5)**
+- Begin Step 5: Services (reporting, validation, explainability)
+- Create PDF generation service
+- Implement image QA and validation
+- Add explainability features (Grad-CAM, SHAP)
 
 #### 🎯 **Key Decisions Made**
 - Used dataclasses for type definitions (better than Pydantic for core types)
@@ -247,10 +257,17 @@ cli/
 - Auto-initialization of TensorFlow and logging
 - Comprehensive validation in type definitions
 
+#### ⚠️ **Important Clarification: Stage 4**
+- **Stage 4 was organizational refactoring, not new functionality**
+- **No new capabilities were added** - just reorganized existing Stage 3 code
+- **Pipeline components** (`preprocess.py`, `segment.py`, `postprocess.py`, `analyze.py`) are wrappers around Stage 3's `ModelProvider` functionality
+- **Same underlying logic** as Stage 3, just better separated into concerns
+- **This was code organization, not feature development**
+
 ---
 
 **Last Updated:** September 20, 2025
-**Current Phase:** Phase 1 - Modularization (Step 1 Complete ✅, Step 2 Complete ✅, Step 3 Complete ✅)
-**Next Milestone:** Begin Step 4 (Pipelines) - Extract preprocessing, segmentation, and postprocessing logic
+**Current Phase:** Phase 1 - Modularization (Steps 1-4 Complete ✅)
+**Next Milestone:** Begin Step 5 (Services) - Create reporting, validation, and explainability services
 
 
