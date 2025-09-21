@@ -13,6 +13,16 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if it exists
 load_dotenv()
 
+# Initialize logging early
+def _setup_initial_logging():
+    """Setup basic logging before full configuration is available."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+_setup_initial_logging()
+
 class Config:
     """
     Centralized configuration management for wound segmentation.

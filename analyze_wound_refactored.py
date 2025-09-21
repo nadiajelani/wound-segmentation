@@ -16,6 +16,7 @@ from woundseg.pipelines import AnalysisPipeline
 from woundseg.services import get_storage_service, get_voice_service, get_reporting_service
 from woundseg.types import AnalysisOptions, Patient
 from woundseg.config import Config
+from woundseg.logging import get_logger
 
 # Flask setup
 app = Flask(__name__)
@@ -33,6 +34,9 @@ REPORT_FOLDER.mkdir(parents=True, exist_ok=True)
 storage_service = get_storage_service()
 voice_service = get_voice_service()
 reporting_service = get_reporting_service()
+
+# Initialize logger
+logger = get_logger(__name__)
 
 def analyze_wound_with_package_api(
     image_path: str, 
@@ -127,10 +131,29 @@ def analyze_wound_with_package_api(
             }
         }
         
-    except Exception as e:
+    except FileNotFoundError as e:
+        logger.error(f"Image file not found: {image_path}")
         return {
             "success": False,
-            "error": str(e),
+            "error": f"Image file not found: {e}",
+            "analysis_result": None,
+            "files": None,
+            "patient_info": {"name": patient_name, "age": patient_age}
+        }
+    except ValueError as e:
+        logger.error(f"Invalid input data: {e}")
+        return {
+            "success": False,
+            "error": f"Invalid input: {e}",
+            "analysis_result": None,
+            "files": None,
+            "patient_info": {"name": patient_name, "age": patient_age}
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error during analysis: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Analysis failed: {e}",
             "analysis_result": None,
             "files": None,
             "patient_info": {"name": patient_name, "age": patient_age}
@@ -220,10 +243,16 @@ def health_check():
     })
 
 if __name__ == "__main__":
-    print("🚀 Starting Wound Analysis Web Interface")
-    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
-    print(f"📁 Report folder: {REPORT_FOLDER}")
-    print(f"🎤 Voice service: {'Enabled' if Config.ENABLE_VOICE_SUMMARY else 'Disabled'}")
-    print(f"🤖 MedSAM available: {'Yes' if Config.ENABLE_MEDSAM else 'No'}")
+    from woundseg.logging import setup_development_logging, get_logger
+    
+    # Setup logging
+    setup_development_logging()
+    logger = get_logger(__name__)
+    
+    logger.info("🚀 Starting Wound Analysis Web Interface")
+    logger.info(f"📁 Upload folder: {UPLOAD_FOLDER}")
+    logger.info(f"📁 Report folder: {REPORT_FOLDER}")
+    logger.info(f"🎤 Voice service: {'Enabled' if Config.ENABLE_VOICE_SUMMARY else 'Disabled'}")
+    logger.info(f"🤖 MedSAM available: {'Yes' if Config.ENABLE_MEDSAM else 'No'}")
     
     app.run(debug=True, host="0.0.0.0", port=5000)

@@ -316,10 +316,16 @@ class WoundCheckerGUI:
 
 def main():
     """Main function to run the GUI application."""
-    print("🚀 Starting Wound Analysis GUI")
-    print(f"📁 Output directory: {Config.OUTPUT_DIR}")
-    print(f"🎤 Voice service: {'Enabled' if Config.ENABLE_VOICE_SUMMARY else 'Disabled'}")
-    print(f"🤖 MedSAM available: {'Yes' if Config.ENABLE_MEDSAM else 'No'}")
+    from woundseg.logging import setup_development_logging, get_logger
+    
+    # Setup logging
+    setup_development_logging()
+    logger = get_logger(__name__)
+    
+    logger.info("🚀 Starting Wound Analysis GUI")
+    logger.info(f"📁 Output directory: {Config.OUTPUT_DIR}")
+    logger.info(f"🎤 Voice service: {'Enabled' if Config.ENABLE_VOICE_SUMMARY else 'Disabled'}")
+    logger.info(f"🤖 MedSAM available: {'Yes' if Config.ENABLE_MEDSAM else 'No'}")
     
     root = tk.Tk()
     app = WoundCheckerGUI(root)

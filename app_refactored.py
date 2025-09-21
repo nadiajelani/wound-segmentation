@@ -224,10 +224,16 @@ def health_check():
     })
 
 if __name__ == "__main__":
-    print("🚀 Starting Simple Wound Analysis Web Interface")
-    print(f"📁 Upload folder: {UPLOAD_FOLDER}")
-    print(f"📁 Report folder: {REPORT_FOLDER}")
-    print(f"🎤 Voice service: {'Enabled' if Config.ENABLE_VOICE_SUMMARY else 'Disabled'}")
-    print(f"🤖 MedSAM available: {'Yes' if Config.ENABLE_MEDSAM else 'No'}")
+    from woundseg.logging import setup_development_logging, get_logger
+    
+    # Setup logging
+    setup_development_logging()
+    logger = get_logger(__name__)
+    
+    logger.info("🚀 Starting Simple Wound Analysis Web Interface")
+    logger.info(f"📁 Upload folder: {UPLOAD_FOLDER}")
+    logger.info(f"📁 Report folder: {REPORT_FOLDER}")
+    logger.info(f"🎤 Voice service: {'Enabled' if Config.ENABLE_VOICE_SUMMARY else 'Disabled'}")
+    logger.info(f"🤖 MedSAM available: {'Yes' if Config.ENABLE_MEDSAM else 'No'}")
     
     app.run(debug=True, host="0.0.0.0", port=5001)
