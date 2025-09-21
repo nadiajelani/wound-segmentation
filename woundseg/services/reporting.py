@@ -104,7 +104,15 @@ class ReportingService:
             filename = f"patient_report_{timestamp}.pdf"
             
             # Save PDF
-            pdf_data = pdf.output(dest='S').encode('latin1')
+            pdf_data = pdf.output(dest='S')
+            if isinstance(pdf_data, bytearray):
+                pdf_data = bytes(pdf_data)  # Convert bytearray to bytes
+            elif isinstance(pdf_data, str):
+                pdf_data = pdf_data.encode('latin1')
+            elif isinstance(pdf_data, bytes):
+                pass  # Already bytes
+            else:
+                pdf_data = str(pdf_data).encode('latin1')
             pdf_path = self.storage_service.save_pdf(pdf_data, 'reports', filename)
             
             # Generate voice summary if requested
@@ -169,7 +177,15 @@ class ReportingService:
             filename = f"clinician_report_{timestamp}.pdf"
             
             # Save PDF
-            pdf_data = pdf.output(dest='S').encode('latin1')
+            pdf_data = pdf.output(dest='S')
+            if isinstance(pdf_data, bytearray):
+                pdf_data = bytes(pdf_data)  # Convert bytearray to bytes
+            elif isinstance(pdf_data, str):
+                pdf_data = pdf_data.encode('latin1')
+            elif isinstance(pdf_data, bytes):
+                pass  # Already bytes
+            else:
+                pdf_data = str(pdf_data).encode('latin1')
             pdf_path = self.storage_service.save_pdf(pdf_data, 'reports', filename)
             
             # Generate voice summary if requested
@@ -212,13 +228,20 @@ class ReportingService:
         pdf.cell(0, 10, 'Your Wound Analysis Report', 0, 1, 'C')
         pdf.ln(5)
         
-        if patient:
-            pdf.set_font('Arial', '', 12)
+        if patient and patient.name and patient.name != 'Unknown':
+            pdf.set_font('Arial', 'B', 14)
             pdf.cell(0, 8, f'Patient: {patient.name}', 0, 1)
             if patient.age:
-                pdf.cell(0, 8, f'Age: {patient.age}', 0, 1)
+                pdf.set_font('Arial', '', 12)
+                pdf.cell(0, 8, f'Age: {patient.age} years old', 0, 1)
+            pdf.ln(3)
+        else:
+            pdf.set_font('Arial', '', 12)
+            pdf.cell(0, 8, 'Patient: Not specified', 0, 1)
+            pdf.ln(3)
         
-        pdf.cell(0, 8, f'Report Date: {datetime.now().strftime("%B %d, %Y")}', 0, 1)
+        pdf.set_font('Arial', '', 10)
+        pdf.cell(0, 6, f'Report Date: {datetime.now().strftime("%B %d, %Y at %I:%M %p")}', 0, 1)
         pdf.ln(10)
     
     def _add_clinician_header(self, pdf, patient):
@@ -227,15 +250,20 @@ class ReportingService:
         pdf.cell(0, 10, 'WOUND ANALYSIS REPORT - CLINICAL', 0, 1, 'C')
         pdf.ln(5)
         
-        if patient:
-            pdf.set_font('Arial', '', 10)
-            pdf.cell(0, 6, f'Patient ID: {patient.name}', 0, 1)
+        if patient and patient.name and patient.name != 'Unknown':
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 6, f'Patient: {patient.name}', 0, 1)
             if patient.age:
-                pdf.cell(0, 6, f'Age: {patient.age}', 0, 1)
-            if hasattr(patient, 'medical_history') and patient.medical_history:
-                pdf.cell(0, 6, f'Medical History: {patient.medical_history}', 0, 1)
+                pdf.set_font('Arial', '', 10)
+                pdf.cell(0, 6, f'Age: {patient.age} years', 0, 1)
+            pdf.ln(2)
+        else:
+            pdf.set_font('Arial', '', 10)
+            pdf.cell(0, 6, 'Patient: Not specified', 0, 1)
+            pdf.ln(2)
         
-        pdf.cell(0, 6, f'Analysis Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', 0, 1)
+        pdf.set_font('Arial', '', 9)
+        pdf.cell(0, 5, f'Report Generated: {datetime.now().strftime("%B %d, %Y at %I:%M %p")}', 0, 1)
         pdf.ln(8)
     
     def _add_patient_content(self, pdf, analysis_result):
@@ -322,10 +350,66 @@ class ReportingService:
         pdf.cell(0, 10, 'Visual Analysis', 0, 1)
         pdf.ln(5)
         
-        # Add image placeholders (would need actual image data)
-        pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 6, '[Original wound image would appear here]', 0, 1)
-        pdf.cell(0, 6, '[Segmentation overlay would appear here]', 0, 1)
+        try:
+            # Add original image
+            if hasattr(analysis_result, 'original_image') and analysis_result.original_image is not None:
+                pdf.set_font('Arial', 'B', 12)
+                pdf.cell(0, 8, 'Your Wound Image:', 0, 1)
+                pdf.ln(2)
+                
+                # Convert numpy array to PIL Image, then to bytes
+                import cv2
+                from PIL import Image
+                import io
+                
+                # Analysis pipeline already converts BGR to RGB, so use image as-is
+                img_rgb = analysis_result.original_image
+                
+                # Resize image to fit in PDF (max width 150mm)
+                pil_img = Image.fromarray(img_rgb)
+                max_width = 150
+                if pil_img.width > max_width:
+                    ratio = max_width / pil_img.width
+                    new_height = int(pil_img.height * ratio)
+                    pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Save to bytes
+                img_buffer = io.BytesIO()
+                pil_img.save(img_buffer, format='PNG')
+                img_data = img_buffer.getvalue()
+                
+                # Add image to PDF
+                pdf.image(io.BytesIO(img_data), x=10, w=min(pil_img.width/4, 150))
+                pdf.ln(pil_img.height/4 + 5)
+            
+            # Add overlay if available
+            if hasattr(analysis_result, 'overlay') and analysis_result.overlay is not None:
+                pdf.set_font('Arial', 'B', 12)
+                pdf.cell(0, 8, 'Analysis Results:', 0, 1)
+                pdf.ln(2)
+                
+                # Overlay should already be in RGB format
+                overlay_rgb = analysis_result.overlay
+                
+                pil_overlay = Image.fromarray(overlay_rgb)
+                if pil_overlay.width > max_width:
+                    ratio = max_width / pil_overlay.width
+                    new_height = int(pil_overlay.height * ratio)
+                    pil_overlay = pil_overlay.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Save to bytes
+                overlay_buffer = io.BytesIO()
+                pil_overlay.save(overlay_buffer, format='PNG')
+                overlay_data = overlay_buffer.getvalue()
+                
+                # Add overlay to PDF
+                pdf.image(io.BytesIO(overlay_data), x=10, w=min(pil_overlay.width/4, 150))
+                pdf.ln(pil_overlay.height/4 + 5)
+                
+        except Exception as e:
+            logger.warning(f"Could not add images to patient report: {e}")
+            pdf.set_font('Arial', '', 10)
+            pdf.cell(0, 6, 'Images could not be included in this report.', 0, 1)
     
     def _add_clinician_images(self, pdf, analysis_result):
         """Add clinician-focused images."""
@@ -334,10 +418,83 @@ class ReportingService:
         pdf.cell(0, 8, 'VISUAL ANALYSIS', 0, 1)
         pdf.ln(5)
         
-        # Add detailed image information
-        pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 6, '[Original Image] [Segmentation Mask] [Overlay] [Heatmap]', 0, 1)
-        pdf.cell(0, 6, 'Image dimensions, processing parameters, and quality metrics would be displayed here.', 0, 1)
+        try:
+            import cv2
+            from PIL import Image
+            import io
+            
+            # Add original image
+            if hasattr(analysis_result, 'original_image') and analysis_result.original_image is not None:
+                pdf.set_font('Arial', 'B', 10)
+                pdf.cell(0, 6, 'Original Image:', 0, 1)
+                pdf.ln(2)
+                
+                # Analysis pipeline already converts BGR to RGB, so use image as-is
+                img_rgb = analysis_result.original_image
+                
+                pil_img = Image.fromarray(img_rgb)
+                max_width = 120
+                if pil_img.width > max_width:
+                    ratio = max_width / pil_img.width
+                    new_height = int(pil_img.height * ratio)
+                    pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Save to bytes and add to PDF
+                img_buffer = io.BytesIO()
+                pil_img.save(img_buffer, format='PNG')
+                img_data = img_buffer.getvalue()
+                pdf.image(io.BytesIO(img_data), x=10, w=min(pil_img.width/4, 120))
+                pdf.ln(pil_img.height/4 + 3)
+            
+            # Add segmentation mask
+            if hasattr(analysis_result, 'mask') and analysis_result.mask is not None:
+                pdf.set_font('Arial', 'B', 10)
+                pdf.cell(0, 6, 'Segmentation Mask:', 0, 1)
+                pdf.ln(2)
+                
+                # Convert mask to 3-channel for display
+                if len(analysis_result.mask.shape) == 2:
+                    mask_3ch = cv2.cvtColor(analysis_result.mask, cv2.COLOR_GRAY2RGB)
+                else:
+                    mask_3ch = analysis_result.mask
+                
+                pil_mask = Image.fromarray(mask_3ch)
+                if pil_mask.width > max_width:
+                    ratio = max_width / pil_mask.width
+                    new_height = int(pil_mask.height * ratio)
+                    pil_mask = pil_mask.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                
+                mask_buffer = io.BytesIO()
+                pil_mask.save(mask_buffer, format='PNG')
+                mask_data = mask_buffer.getvalue()
+                pdf.image(io.BytesIO(mask_data), x=10, w=min(pil_mask.width/4, 120))
+                pdf.ln(pil_mask.height/4 + 3)
+            
+            # Add overlay if available
+            if hasattr(analysis_result, 'overlay') and analysis_result.overlay is not None:
+                pdf.set_font('Arial', 'B', 10)
+                pdf.cell(0, 6, 'Analysis Overlay:', 0, 1)
+                pdf.ln(2)
+                
+                # Overlay should already be in RGB format
+                overlay_rgb = analysis_result.overlay
+                
+                pil_overlay = Image.fromarray(overlay_rgb)
+                if pil_overlay.width > max_width:
+                    ratio = max_width / pil_overlay.width
+                    new_height = int(pil_overlay.height * ratio)
+                    pil_overlay = pil_overlay.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                
+                overlay_buffer = io.BytesIO()
+                pil_overlay.save(overlay_buffer, format='PNG')
+                overlay_data = overlay_buffer.getvalue()
+                pdf.image(io.BytesIO(overlay_data), x=10, w=min(pil_overlay.width/4, 120))
+                pdf.ln(pil_overlay.height/4 + 3)
+                
+        except Exception as e:
+            logger.warning(f"Could not add images to clinician report: {e}")
+            pdf.set_font('Arial', '', 10)
+            pdf.cell(0, 6, 'Images could not be included in this report.', 0, 1)
     
     def _add_technical_appendix(self, pdf, analysis_result):
         """Add technical appendix for clinicians."""
@@ -417,7 +574,15 @@ class ReportingService:
             filename = f"comparison_report_{timestamp}.pdf"
             
             # Save PDF
-            pdf_data = pdf.output(dest='S').encode('latin1')
+            pdf_data = pdf.output(dest='S')
+            if isinstance(pdf_data, bytearray):
+                pdf_data = bytes(pdf_data)  # Convert bytearray to bytes
+            elif isinstance(pdf_data, str):
+                pdf_data = pdf_data.encode('latin1')
+            elif isinstance(pdf_data, bytes):
+                pass  # Already bytes
+            else:
+                pdf_data = str(pdf_data).encode('latin1')
             pdf_path = self.storage_service.save_pdf(pdf_data, 'reports', filename)
             
             logger.info(f"Comparison report generated: {pdf_path}")

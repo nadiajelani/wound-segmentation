@@ -113,10 +113,23 @@ class VoiceService:
     
     def _generate_patient_text(self, analysis_result: Dict[str, Any]) -> str:
         """Generate patient-friendly text."""
+        # Extract patient information
+        patient = analysis_result.get('patient', {})
+        patient_name = patient.get('name', 'Patient') if isinstance(patient, dict) else getattr(patient, 'name', 'Patient')
+        patient_age = patient.get('age', None) if isinstance(patient, dict) else getattr(patient, 'age', None)
+        
         # Extract key information
         wound_area = analysis_result.get('area_mm2', 0)
         healing_trend = analysis_result.get('healing_potential', 'unknown')
         confidence = analysis_result.get('confidence_score', 0)
+        
+        # Create personalized greeting
+        if patient_name and patient_name != 'Unknown':
+            greeting = f"Hello {patient_name}."
+            if patient_age:
+                greeting += f" You are {patient_age} years old."
+        else:
+            greeting = "Hello."
         
         # Convert to patient-friendly language
         if wound_area > 0:
@@ -135,18 +148,32 @@ class VoiceService:
         
         confidence_text = f"The analysis confidence is {confidence:.0f} percent."
         
-        return f"{area_text} {trend_text} {confidence_text} Please continue following your treatment plan and consult your healthcare provider if you have any concerns."
+        return f"{greeting} {area_text} {trend_text} {confidence_text} Please continue following your treatment plan and consult your healthcare provider if you have any concerns."
     
     def _generate_clinician_text(self, analysis_result: Dict[str, Any]) -> str:
         """Generate clinician-focused text."""
+        # Extract patient information
+        patient = analysis_result.get('patient', {})
+        patient_name = patient.get('name', 'Unknown') if isinstance(patient, dict) else getattr(patient, 'name', 'Unknown')
+        patient_age = patient.get('age', None) if isinstance(patient, dict) else getattr(patient, 'age', None)
+        
         # Extract detailed information
         wound_area = analysis_result.get('area_mm2', 0)
         healing_trend = analysis_result.get('healing_potential', 'unknown')
         confidence = analysis_result.get('confidence_score', 0)
         severity = analysis_result.get('severity', 'unknown')
         
+        # Create patient identification
+        if patient_name and patient_name != 'Unknown':
+            patient_info = f"Patient: {patient_name}"
+            if patient_age:
+                patient_info += f", Age: {patient_age}"
+        else:
+            patient_info = "Patient: Unknown"
+        
         text_parts = [
-            f"Wound analysis complete. Area: {wound_area:.2f} square millimeters.",
+            f"Clinical wound analysis for {patient_info}.",
+            f"Wound area: {wound_area:.2f} square millimeters.",
             f"Segmentation confidence: {confidence:.1f} percent.",
             f"Healing trend assessment: {healing_trend}.",
             f"Severity classification: {severity}."
