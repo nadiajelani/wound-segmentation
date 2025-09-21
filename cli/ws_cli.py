@@ -291,11 +291,56 @@ def train_unet(
     
     This command trains a new U-Net model using the provided training data.
     """
-    console.print(f"[yellow]Training command not yet implemented[/yellow]")
-    console.print(f"Data directory: {data_dir}")
-    console.print(f"Epochs: {epochs}")
-    console.print(f"Batch size: {batch_size}")
-    console.print(f"Learning rate: {learning_rate}")
+    try:
+        from woundseg.training.unet_train import train_unet_model
+        
+        console.print(f"[bold blue]Starting U-Net Training[/bold blue]")
+        console.print(f"Data directory: {data_dir}")
+        console.print(f"Epochs: {epochs}")
+        console.print(f"Batch size: {batch_size}")
+        console.print(f"Learning rate: {learning_rate}")
+        
+        if not data_dir.exists():
+            console.print(f"[red]Error: Data directory does not exist: {data_dir}[/red]")
+            raise typer.Exit(1)
+        
+        # Train the model
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Training U-Net model...", total=None)
+            
+            results = train_unet_model(
+                data_dir=data_dir,
+                output_dir=output_dir,
+                epochs=epochs,
+                batch_size=batch_size,
+                learning_rate=learning_rate
+            )
+            
+            progress.update(task, description="✅ Training completed")
+        
+        # Display results
+        console.print(f"[green]Training completed successfully![/green]")
+        console.print(f"Model saved to: {results['model_path']}")
+        console.print(f"Best model: {results['best_model_path']}")
+        
+        if verbose:
+            test_results = results['test_results']
+            console.print(f"Test accuracy: {test_results.get('accuracy', 'N/A')}")
+            console.print(f"Test loss: {test_results.get('loss', 'N/A')}")
+        
+    except ImportError as e:
+        console.print(f"[red]Error: Training module not available: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Training failed: {e}[/red]")
+        if verbose:
+            import traceback
+            console.print(traceback.format_exc())
+        raise typer.Exit(1)
 
 @app.command()
 def train_classifier(
@@ -311,11 +356,56 @@ def train_classifier(
     
     This command trains a new classifier model using the provided training data.
     """
-    console.print(f"[yellow]Training command not yet implemented[/yellow]")
-    console.print(f"Data directory: {data_dir}")
-    console.print(f"Epochs: {epochs}")
-    console.print(f"Batch size: {batch_size}")
-    console.print(f"Learning rate: {learning_rate}")
+    try:
+        from woundseg.training.classifier_train import train_classifier_model
+        
+        console.print(f"[bold blue]Starting Classifier Training[/bold blue]")
+        console.print(f"Data directory: {data_dir}")
+        console.print(f"Epochs: {epochs}")
+        console.print(f"Batch size: {batch_size}")
+        console.print(f"Learning rate: {learning_rate}")
+        
+        if not data_dir.exists():
+            console.print(f"[red]Error: Data directory does not exist: {data_dir}[/red]")
+            raise typer.Exit(1)
+        
+        # Train the model
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Training classifier model...", total=None)
+            
+            results = train_classifier_model(
+                data_dir=data_dir,
+                output_dir=output_dir,
+                epochs=epochs,
+                batch_size=batch_size,
+                learning_rate=learning_rate
+            )
+            
+            progress.update(task, description="✅ Training completed")
+        
+        # Display results
+        console.print(f"[green]Training completed successfully![/green]")
+        console.print(f"Model saved to: {results['model_path']}")
+        console.print(f"Best model: {results['best_model_path']}")
+        
+        if verbose:
+            test_results = results['test_results']
+            console.print(f"Test accuracy: {test_results.get('accuracy', 'N/A')}")
+            console.print(f"Test loss: {test_results.get('loss', 'N/A')}")
+        
+    except ImportError as e:
+        console.print(f"[red]Error: Training module not available: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Training failed: {e}[/red]")
+        if verbose:
+            import traceback
+            console.print(traceback.format_exc())
+        raise typer.Exit(1)
 
 @app.command()
 def info():
