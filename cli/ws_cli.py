@@ -40,7 +40,6 @@ console = Console()
 @app.command()
 def analyze(
     image: Path = typer.Argument(..., help="Path to wound image file"),
-    use_medsam: bool = typer.Option(False, "--use-medsam", help="Use MedSAM model instead of U-Net"),
     report: bool = typer.Option(True, "--report/--no-report", help="Generate PDF reports"),
     voice: bool = typer.Option(True, "--voice/--no-voice", help="Generate voice summaries"),
     name: Optional[str] = typer.Option(None, "--name", help="Patient name"),
@@ -408,6 +407,64 @@ def train_classifier(
         raise typer.Exit(1)
 
 @app.command()
+def generate_synthetic(
+    num_images: int = typer.Option(10, "--num-images", "-n", help="Number of synthetic images to generate"),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Custom output directory"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """
+    Generate synthetic wound images for training data augmentation.
+    
+    This command uses Stable Diffusion to generate diverse wound images
+    for training data augmentation. Requires ENABLE_SYNTHETIC_DATA=true.
+    """
+    if not Config.ENABLE_SYNTHETIC_DATA:
+        console.print("[red]❌ Synthetic data generation is disabled.[/red]")
+        console.print("   Set ENABLE_SYNTHETIC_DATA=true in your environment to enable.")
+        raise typer.Exit(1)
+    
+    console.print(f"[blue]🎨 Generating {num_images} synthetic wound images...[/blue]")
+    
+    try:
+        from woundseg.training.synthetic import create_synthetic_training_data
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Generating synthetic images...", total=None)
+            
+            result = create_synthetic_training_data(
+                num_images=num_images,
+                output_dir=output_dir
+            )
+        
+        if result["success"]:
+            console.print(f"[green]✅ Successfully generated {result['images_generated']} synthetic images[/green]")
+            console.print(f"[blue]📁 Output directory: {result['output_dir']}[/blue]")
+            console.print(f"[blue]📋 Metadata saved to: {result['metadata_path']}[/blue]")
+            
+            if verbose:
+                console.print("\n[bold]Generated images:[/bold]")
+                for img_path in result["images"]:
+                    console.print(f"  • {img_path}")
+        else:
+            console.print(f"[red]❌ Failed to generate synthetic data: {result['reason']}[/red]")
+            raise typer.Exit(1)
+            
+    except ImportError as e:
+        console.print(f"[red]❌ Missing dependencies for synthetic data generation: {e}[/red]")
+        console.print("   Install required packages: pip install torch diffusers transformers")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Error generating synthetic data: {e}[/red]")
+        if verbose:
+            import traceback
+            console.print(traceback.format_exc())
+        raise typer.Exit(1)
+
+@app.command()
 def info():
     """
     Display system information and configuration.
@@ -421,7 +478,6 @@ def info():
         f"Device: {Config.DEVICE}\n"
         f"Mixed Precision: {Config.MIXED_PRECISION}\n\n"
         f"Feature Flags:\n"
-        f"• MedSAM: {Config.ENABLE_MEDSAM}\n"
         f"• Voice Summary: {Config.ENABLE_VOICE_SUMMARY}\n"
         f"• Explainability: {Config.ENABLE_EXPLAINABILITY}\n"
         f"• Synthetic Data: {Config.ENABLE_SYNTHETIC_DATA}",

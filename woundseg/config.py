@@ -39,8 +39,7 @@ class Config:
     LOGS_DIR = PROJECT_ROOT / "logs"
     
     # Model paths
-    UNET_WEIGHTS_PATH = os.getenv("UNET_WEIGHTS_PATH", str(MODELS_DIR / "simclr_unet_patch_wound.keras"))
-    MEDSAM_WEIGHTS_PATH = os.getenv("MEDSAM_WEIGHTS_PATH", str(MODELS_DIR / "medsam_model.pth"))
+    UNET_WEIGHTS_PATH = os.getenv("UNET_WEIGHTS_PATH", str(MODELS_DIR / "simple_unet_wound.keras"))
     CLASSIFIER_WEIGHTS_PATH = os.getenv("CLASSIFIER_WEIGHTS_PATH", str(MODELS_DIR / "resnet_classifier.h5"))
     
     # Device configuration
@@ -48,7 +47,6 @@ class Config:
     MIXED_PRECISION = os.getenv("MIXED_PRECISION", "true").lower() == "true"
     
     # Feature flags
-    ENABLE_MEDSAM = os.getenv("ENABLE_MEDSAM", "true").lower() == "true"
     ENABLE_EXPLAINABILITY = os.getenv("ENABLE_EXPLAINABILITY", "true").lower() == "true"
     ENABLE_VOICE_SUMMARY = os.getenv("ENABLE_VOICE_SUMMARY", "false").lower() == "true"
     ENABLE_SYNTHETIC_DATA = os.getenv("ENABLE_SYNTHETIC_DATA", "false").lower() == "true"
@@ -119,7 +117,6 @@ class Config:
         """Get the full path to a model file."""
         model_paths = {
             "unet": cls.UNET_WEIGHTS_PATH,
-            "medsam": cls.MEDSAM_WEIGHTS_PATH,
             "classifier": cls.CLASSIFIER_WEIGHTS_PATH,
         }
         

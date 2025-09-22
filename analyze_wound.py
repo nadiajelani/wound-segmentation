@@ -28,7 +28,6 @@ os.makedirs(REPORT_FOLDER, exist_ok=True)
 from woundseg.config import Config
 
 UNET_MODEL_PATH = Config.get_model_path("unet")
-MEDSAM_MODEL_PATH = Config.get_model_path("medsam")
 
 model = build_unet(input_shape=(128, 128, 3))
 model.load_weights(UNET_MODEL_PATH)

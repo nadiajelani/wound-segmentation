@@ -1,0 +1,30 @@
+# Testing dependencies for wound segmentation system
+
+# Core testing framework
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+pytest-html>=3.1.0
+pytest-xdist>=3.0.0  # For parallel test execution
+
+# Test utilities
+mock>=4.0.0
+unittest-mock>=1.0.0
+
+# Coverage reporting
+coverage>=7.0.0
+
+# Performance testing
+pytest-benchmark>=4.0.0
+
+# Image testing utilities
+Pillow>=9.0.0
+numpy>=1.21.0
+
+# System monitoring for performance tests
+psutil>=5.8.0
+
+# Optional: For advanced testing features
+pytest-timeout>=2.1.0
+pytest-sugar>=0.9.0  # Better test output formatting
+pytest-clarity>=1.0.0  # Better assertion output

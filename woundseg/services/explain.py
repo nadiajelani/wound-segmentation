@@ -49,22 +49,33 @@ class ExplainabilityService:
     def _initialize_explainability_libraries(self):
         """Initialize explainability libraries with lazy imports."""
         try:
-            # Try to import TensorFlow for Grad-CAM
+            # Try to import Grad-CAM
             import tensorflow as tf
-            self.tf = tf
+            from tensorflow.keras import backend as K
             self.gradcam_available = True
-            logger.info("Grad-CAM support available")
+            logger.info("Grad-CAM available")
         except ImportError:
-            logger.warning("TensorFlow not available - Grad-CAM disabled")
+            logger.warning("Grad-CAM not available - install TensorFlow")
         
         try:
-            # Try to import SHAP (lazy import to avoid dependency issues)
+            # Try to import SHAP
             import shap
-            self.shap = shap
             self.shap_available = True
-            logger.info("SHAP support available")
+            logger.info("SHAP available")
         except ImportError:
-            logger.warning("SHAP not available - SHAP explanations disabled")
+            logger.warning("SHAP not available - install with: pip install shap")
+        
+        try:
+            # Try to import LIME
+            import lime
+            from lime import lime_image
+            self.lime_available = True
+            logger.info("LIME available")
+        except ImportError:
+            logger.warning("LIME not available - install with: pip install lime")
+        
+        if not any([self.gradcam_available, self.shap_available, getattr(self, 'lime_available', False)]):
+            logger.warning("No explainability libraries available")
     
     def is_available(self) -> bool:
         """
@@ -371,9 +382,125 @@ class ExplainabilityService:
             'available': self.is_available(),
             'gradcam_available': self.gradcam_available,
             'shap_available': self.shap_available,
+            'lime_available': getattr(self, 'lime_available', False),
             'tensorflow_available': hasattr(self, 'tf'),
             'shap_imported': hasattr(self, 'shap')
         }
+    
+    def generate_lime_explanation(self, image: np.ndarray, 
+                                num_features: int = 10) -> Optional[Dict[str, Any]]:
+        """
+        Generate LIME explanation for the model's prediction.
+        
+        Args:
+            image: Input image as numpy array
+            num_features: Number of features to highlight
+            
+        Returns:
+            LIME explanation data, or None if generation failed
+        """
+        if not self.enabled or not getattr(self, 'lime_available', False):
+            logger.warning("LIME not available - skipping explanation generation")
+            return None
+        
+        try:
+            import lime
+            from lime import lime_image
+            
+            logger.info("Generating LIME explanation")
+            
+            # Get model for prediction
+            model = self.model_provider.get_unet_model()
+            
+            # Create LIME explainer
+            explainer = lime_image.LimeImageExplainer()
+            
+            # Define prediction function
+            def predict_fn(images):
+                # Preprocess images for model
+                processed_images = []
+                for img in images:
+                    # Resize to model input size
+                    img_resized = cv2.resize(img, (128, 128))
+                    img_normalized = img_resized.astype(np.float32) / 255.0
+                    processed_images.append(img_normalized)
+                
+                # Predict
+                predictions = model.predict(np.array(processed_images))
+                return predictions
+            
+            # Generate explanation
+            explanation = explainer.explain_instance(
+                image.astype(np.uint8),
+                predict_fn,
+                top_labels=1,
+                hide_color=0,
+                num_samples=1000
+            )
+            
+            # Get explanation data
+            explanation_data = {
+                'method': 'LIME',
+                'top_features': explanation.top_labels[0],
+                'explanation_image': explanation.get_image_and_mask(
+                    explanation.top_labels[0],
+                    positive_only=True,
+                    negative_only=False,
+                    num_features=num_features,
+                    hide_rest=False
+                )[0],
+                'segments': explanation.segments,
+                'available_methods': ['LIME']
+            }
+            
+            logger.info("LIME explanation generated successfully")
+            return explanation_data
+            
+        except Exception as e:
+            logger.error(f"LIME explanation generation failed: {e}")
+            return None
+    
+    def generate_comprehensive_explanation(self, image: np.ndarray) -> Dict[str, Any]:
+        """
+        Generate comprehensive explanation using all available methods.
+        
+        Args:
+            image: Input image as numpy array
+            
+        Returns:
+            Dictionary containing all available explanations
+        """
+        logger.info("Generating comprehensive explanation")
+        
+        explanations = {
+            'image_shape': image.shape,
+            'methods_used': [],
+            'explanations': {}
+        }
+        
+        # Try Grad-CAM
+        if self.gradcam_available:
+            gradcam_result = self.generate_gradcam_explanation(image)
+            if gradcam_result is not None:
+                explanations['explanations']['gradcam'] = gradcam_result
+                explanations['methods_used'].append('Grad-CAM')
+        
+        # Try SHAP
+        if self.shap_available:
+            shap_result = self.generate_shap_explanation(image)
+            if shap_result is not None:
+                explanations['explanations']['shap'] = shap_result
+                explanations['methods_used'].append('SHAP')
+        
+        # Try LIME
+        if getattr(self, 'lime_available', False):
+            lime_result = self.generate_lime_explanation(image)
+            if lime_result is not None:
+                explanations['explanations']['lime'] = lime_result
+                explanations['methods_used'].append('LIME')
+        
+        logger.info(f"Comprehensive explanation generated using: {explanations['methods_used']}")
+        return explanations
 
 
 # Global explainability service instance

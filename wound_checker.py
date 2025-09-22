@@ -24,7 +24,6 @@ from woundseg.config import Config
 MODEL_DIR = Config.MODELS_DIR
 CLASSIFIER_PATH = Config.get_model_path("classifier")  # ResNet50
 UNET_PATH = Config.get_model_path("unet")  # U-Net
-MEDSAM_PATH = Config.get_model_path("medsam")  # MedSAM
 IMG_HEIGHT, IMG_WIDTH = 224, 224
 UNET_INPUT_SIZE = (256, 256)  # Common U-Net input size
 MEDSAM_INPUT_SIZE = (1024, 1024)  # Typical MedSAM input size

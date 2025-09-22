@@ -12,7 +12,7 @@ woundseg/
   config.py
   types.py
   logging.py
-  models/{provider.py, keras_custom.py, unet.py, medsam.py, classifier.py}
+  models/{provider.py, keras_custom.py, unet.py, classifier.py}
   pipelines/{preprocess.py, segment.py, postprocess.py, analyze.py}
   services/{reporting.py, validation.py, storage.py, voice.py, explain.py}
   training/{data.py, unet_train.py, classifier_train.py, synthetic.py}
@@ -23,7 +23,7 @@ cli/
 
 ### Step-by-step
 1) Config and constants
-   - Create `woundseg/config.py` with env-driven settings (UNET_WEIGHTS_PATH, MEDSAM_WEIGHTS_PATH, OUTPUT_DIR, DEVICE, FEATURE_FLAGS like ENABLE_MEDSAM, ENABLE_EXPLAIN, ENABLE_SYNTHETIC).
+   - Create `woundseg/config.py` with env-driven settings (UNET_WEIGHTS_PATH, OUTPUT_DIR, DEVICE, FEATURE_FLAGS like ENABLE_EXPLAIN, ENABLE_SYNTHETIC).
    - Add `.env.example` and document usage; default to `./models` and `./outputs`.
    - Set mixed-precision and TF threading here (single place) based on DEVICE.
 
@@ -31,8 +31,8 @@ cli/
    - Add `woundseg/types.py` with dataclasses for `Patient`, `AnalysisOptions`, `AnalysisResult`, `Artifacts`.
 
 3) Model providers
-   - Implement `woundseg/models/provider.py` with lazy singletons for U-Net, MedSAM, Classifier, device selection.
-   - Migrate build/load from `wound_medsam.py` into `unet.py` and `medsam.py`.
+   - Implement `woundseg/models/provider.py` with lazy singletons for U-Net, Classifier, device selection.
+   - Migrate build/load from `wound_medsam.py` into `unet.py`.
    - Register Keras custom objects in `models/keras_custom.py` (FocalTverskyLoss, IOUScore) only once.
 
 4) Pipelines
@@ -51,7 +51,7 @@ cli/
 
 6) CLI
    - ✅ Add `cli/ws_cli.py` with Typer commands:
-     - `analyze --image <path> [--use-medsam] [--report] [--name] [--age]` → saves outputs to OUTPUT_DIR.
+     - `analyze --image <path> [--report] [--name] [--age]` → saves outputs to OUTPUT_DIR.
      - `train-unet` and `train-classifier` wrappers calling training modules.
 
 7) Refactor existing scripts
@@ -65,7 +65,7 @@ cli/
 9) Optional extras (guarded by feature flags)
    - `training/synthetic.py` for Stable Diffusion synthetic wounds (ENABLE_SYNTHETIC).
    - Explainability (ENABLE_EXPLAIN) toggles SHAP/Grad-CAM usage.
-   - MedSAM usage via ENABLE_MEDSAM + presence of weights.
+   - ~~MedSAM usage via ENABLE_MEDSAM + presence of weights.~~ (SKIPPED - MedSAM not used)
 
 10) Testing
    - Add `tests/` with unit tests for preprocess, segment, combine, assess, validation, reporting.
@@ -73,12 +73,12 @@ cli/
 
 11) Packaging
    - Add `pyproject.toml` with project metadata; install locally via `pip install -e .`.
-   - Generate `requirements.txt` and `requirements-train.txt` (extras for training/medsam/voice/explain).
+   - Generate `requirements.txt` and `requirements-train.txt` (extras for training/voice/explain).
 
 ### Acceptance criteria
 - `ws analyze --image sample.jpg` produces mask and report in OUTPUT_DIR.
 - No absolute paths; env-config works on another Mac.
-- U-Net weights loaded via provider singletons; MedSAM optional behind flag.
+- U-Net weights loaded via provider singletons.
 - Mixed precision and device selection applied centrally via config.
 - Unit tests pass locally; lint clean.
 
@@ -192,18 +192,18 @@ cli/
 - [x] ✅ Replace broad except blocks with specific error handling
 
 #### 9) Optional Extras
-- [ ] ⏳ Create `training/synthetic.py` for Stable Diffusion
-- [ ] ⏳ Implement feature flags for explainability
-- [ ] ⏳ Add MedSAM feature flag implementation
+- [x] ✅ Create `training/synthetic.py` for Stable Diffusion
+- [x] ✅ Implement feature flags for explainability
+- [x] ✅ ~~Add MedSAM feature flag implementation~~ (SKIPPED - MedSAM not used)
 
 #### 10) Testing
-- [ ] ⏳ Create `tests/` directory structure
-- [ ] ⏳ Add unit tests for preprocessing functions
-- [ ] ⏳ Add unit tests for segmentation functions
-- [ ] ⏳ Add unit tests for validation functions
-- [ ] ⏳ Add unit tests for reporting functions
-- [ ] ⏳ Add golden image tests for deterministic outputs
-- [ ] ⏳ Set up test fixtures and mock data
+- [x] ✅ Create `tests/` directory structure
+- [x] ✅ Add unit tests for preprocessing functions
+- [x] ✅ Add unit tests for segmentation functions
+- [x] ✅ Add unit tests for validation functions
+- [x] ✅ Add unit tests for reporting functions
+- [x] ✅ Add golden image tests for deterministic outputs
+- [x] ✅ Set up test fixtures and mock data
 
 #### 11) Packaging
 - [ ] ⏳ Create `pyproject.toml` with project metadata
@@ -232,7 +232,7 @@ cli/
 - [ ] ⏳ No absolute paths in any file
 - [ ] ⏳ Environment config works on different machine
 - [ ] ⏳ U-Net weights load via provider singleton
-- [ ] ⏳ MedSAM optional behind feature flag
+- [ ] ⏳ ~~MedSAM optional behind feature flag~~ (SKIPPED - MedSAM not used)
 - [ ] ⏳ Mixed precision applied centrally
 - [ ] ⏳ All unit tests pass
 - [ ] ⏳ Code passes linting
@@ -283,11 +283,21 @@ cli/
 - **Step 8 - Medical Compliance**: HIPAA-compliant audit trails and error tracking
 - **Step 8 - Performance Monitoring**: Built-in performance and model usage tracking
 
-#### 📋 **Next Steps (Step 9)**
-- Begin Step 9: Optional Extras
-- Create synthetic data generation for training
-- Implement advanced feature flags
-- Add MedSAM feature flag implementation
+#### ✅ **Completed (Step 9)**
+- **Step 9 - Synthetic Data Generation**: Created comprehensive synthetic wound generation using Stable Diffusion
+- **Step 9 - Feature Flag Implementation**: Implemented ENABLE_SYNTHETIC_DATA feature flag with CLI integration
+- **Step 9 - MedSAM Removal**: Removed all MedSAM references from codebase as requested
+- **Step 9 - CLI Integration**: Added `generate-synthetic` command with full functionality
+- **Step 9 - Configuration Updates**: Updated config.py and env.template to remove MedSAM references
+
+#### ✅ **Completed (Step 10)**
+- **Step 10 - Test Infrastructure**: Created comprehensive testing framework with pytest
+- **Step 10 - Unit Tests**: Implemented unit tests for all major components (preprocessing, segmentation, validation, reporting, services, models)
+- **Step 10 - Integration Tests**: Created integration tests for complete analysis pipeline
+- **Step 10 - Golden Image Tests**: Added deterministic output tests for consistency verification
+- **Step 10 - Test Fixtures**: Set up comprehensive test fixtures and mock data
+- **Step 10 - Test Runner**: Created professional test runner with multiple execution modes
+- **Step 10 - Test Configuration**: Set up pytest configuration with markers and coverage support
 
 #### 🎯 **Key Decisions Made**
 - Used dataclasses for type definitions (better than Pydantic for core types)
@@ -305,7 +315,7 @@ cli/
 ---
 
 **Last Updated:** September 21, 2025
-**Current Phase:** Phase 1 - Modularization (Steps 1-8 Complete ✅)
-**Next Milestone:** Begin Step 9 (Optional Extras) - Synthetic data generation and advanced features
+**Current Phase:** Phase 1 - Modularization (Steps 1-10 Complete ✅)
+**Next Milestone:** Begin Step 11 (Packaging) - Project packaging and distribution
 
 
