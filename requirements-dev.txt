@@ -1,0 +1,40 @@
+# Development Dependencies
+# Include base requirements
+-r requirements.txt
+
+# Testing Framework
+pytest>=7.0.0,<8.0.0
+pytest-cov>=4.0.0,<5.0.0
+pytest-mock>=3.10.0,<4.0.0
+pytest-xdist>=2.5.0,<3.0.0
+
+# Code Formatting
+black>=22.0.0,<24.0.0
+isort>=5.10.0,<6.0.0
+autopep8>=1.6.0,<2.0.0
+
+# Linting
+flake8>=5.0.0,<7.0.0
+pylint>=2.15.0,<3.0.0
+mypy>=1.0.0,<2.0.0
+
+# Pre-commit Hooks
+pre-commit>=2.20.0,<4.0.0
+
+# Documentation
+sphinx>=5.0.0,<6.0.0
+sphinx-rtd-theme>=1.0.0,<2.0.0
+myst-parser>=0.18.0,<1.0.0
+
+# Security
+bandit>=1.7.0,<2.0.0
+safety>=2.0.0,<3.0.0
+
+# Performance Profiling
+memory-profiler>=0.60.0,<1.0.0
+line-profiler>=4.0.0,<5.0.0
+
+# Development Tools
+ipython>=8.0.0,<9.0.0
+jupyter>=1.0.0,<2.0.0
+ipykernel>=6.0.0,<7.0.0

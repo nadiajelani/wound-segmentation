@@ -1,0 +1,405 @@
+Metadata-Version: 2.4
+Name: woundseg
+Version: 1.0.0
+Summary: AI-powered wound segmentation and analysis system for medical applications
+Home-page: https://github.com/woundseg/woundseg
+Author: Wound Segmentation Team
+Author-email: Wound Segmentation Team <contact@woundseg.ai>
+Maintainer-email: Wound Segmentation Team <contact@woundseg.ai>
+License: MIT
+Project-URL: Homepage, https://github.com/woundseg/woundseg
+Project-URL: Documentation, https://woundseg.readthedocs.io
+Project-URL: Repository, https://github.com/woundseg/woundseg.git
+Project-URL: Issues, https://github.com/woundseg/woundseg/issues
+Project-URL: Changelog, https://github.com/woundseg/woundseg/blob/main/CHANGELOG.md
+Keywords: medical-ai,wound-segmentation,computer-vision,deep-learning,healthcare,tensorflow,keras,unet
+Platform: any
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Healthcare Industry
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Topic :: Scientific/Engineering :: Medical Science Apps.
+Classifier: Topic :: Scientific/Engineering :: Image Recognition
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: tensorflow<2.16.0,>=2.10.0
+Requires-Dist: keras<3.0.0,>=2.10.0
+Requires-Dist: numpy<2.0.0,>=1.21.0
+Requires-Dist: opencv-python<5.0.0,>=4.5.0
+Requires-Dist: scikit-image<1.0.0,>=0.19.0
+Requires-Dist: scikit-learn<2.0.0,>=1.0.0
+Requires-Dist: Pillow<11.0.0,>=9.0.0
+Requires-Dist: matplotlib<4.0.0,>=3.5.0
+Requires-Dist: seaborn<1.0.0,>=0.11.0
+Requires-Dist: pandas<3.0.0,>=1.3.0
+Requires-Dist: h5py<4.0.0,>=3.1.0
+Requires-Dist: typer[all]<1.0.0,>=0.7.0
+Requires-Dist: rich<14.0.0,>=12.0.0
+Requires-Dist: python-dotenv<2.0.0,>=0.19.0
+Requires-Dist: click<9.0.0,>=8.0.0
+Requires-Dist: reportlab<5.0.0,>=3.6.0
+Requires-Dist: fpdf2<3.0.0,>=2.5.0
+Requires-Dist: gtts<3.0.0,>=2.2.0
+Requires-Dist: pygame<3.0.0,>=2.1.0
+Provides-Extra: train
+Requires-Dist: albumentations<2.0.0,>=1.3.0; extra == "train"
+Requires-Dist: tensorboard<3.0.0,>=2.10.0; extra == "train"
+Requires-Dist: wandb<1.0.0,>=0.13.0; extra == "train"
+Requires-Dist: tqdm<5.0.0,>=4.64.0; extra == "train"
+Provides-Extra: explain
+Requires-Dist: shap<1.0.0,>=0.41.0; extra == "explain"
+Requires-Dist: lime<1.0.0,>=0.2.0; extra == "explain"
+Requires-Dist: grad-cam<2.0.0,>=1.4.0; extra == "explain"
+Provides-Extra: synthetic
+Requires-Dist: diffusers<1.0.0,>=0.20.0; extra == "synthetic"
+Requires-Dist: transformers<5.0.0,>=4.25.0; extra == "synthetic"
+Requires-Dist: accelerate<1.0.0,>=0.20.0; extra == "synthetic"
+Requires-Dist: torch<3.0.0,>=1.13.0; extra == "synthetic"
+Requires-Dist: torchvision<1.0.0,>=0.14.0; extra == "synthetic"
+Provides-Extra: dev
+Requires-Dist: pytest<8.0.0,>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov<5.0.0,>=4.0.0; extra == "dev"
+Requires-Dist: pytest-mock<4.0.0,>=3.10.0; extra == "dev"
+Requires-Dist: black<24.0.0,>=22.0.0; extra == "dev"
+Requires-Dist: isort<6.0.0,>=5.10.0; extra == "dev"
+Requires-Dist: flake8<7.0.0,>=5.0.0; extra == "dev"
+Requires-Dist: mypy<2.0.0,>=1.0.0; extra == "dev"
+Requires-Dist: pre-commit<4.0.0,>=2.20.0; extra == "dev"
+Provides-Extra: all
+Requires-Dist: woundseg[dev,explain,synthetic,train]; extra == "all"
+Dynamic: author
+Dynamic: home-page
+Dynamic: platform
+Dynamic: requires-python
+
+# 🏥 Wound Segmentation AI Platform
+
+An AI-powered wound assessment platform that uses machine learning to segment wound regions from medical images, classify wound presence, estimate severity and healing potential, and generate clinical reports.
+
+## 🚀 Quick Start
+
+### **One-Command Setup (Recommended)**
+```bash
+# Clone the repository
+git clone <repository-url>
+cd wound-segmentation
+
+# Complete environment setup
+make setup
+
+# Verify everything works
+make check
+
+# Test the application
+make test
+```
+
+### **Alternative Setup**
+```bash
+# Run automated setup script
+./setup_environment.sh
+
+# Run health check
+python health_check.py
+
+# Test your script
+python test_wound_progress.py
+```
+
+## 📋 Prerequisites
+
+- **macOS** (tested on macOS 15.6.1)
+- **8GB RAM** (16GB recommended for GPU)
+- **10GB free disk space** for models and dependencies
+- **Homebrew** package manager
+
+## 🛠️ Available Commands
+
+```bash
+# Setup & Installation
+make setup          # Run automated environment setup
+make install-deps   # Install Python dependencies
+make install-models # Download required model files
+
+# Verification & Testing
+make check          # Run health check
+make test           # Run test script
+make test-gui       # Test GUI functionality
+
+# Running Applications
+make run-gui        # Run GUI application
+make run-api        # Run web API
+make run-cli        # Run CLI with sample image
+
+# Maintenance
+make clean          # Clean temporary files
+make update-deps    # Update dependencies
+make freeze-deps    # Generate requirements from current environment
+
+# Help
+make help           # Show all available commands
+```
+
+## 🏗️ System Architecture
+
+### **Core Models**
+- **Segmentation**: Custom U-Net (128×128 input) with optional MedSAM integration
+- **Classification**: ResNet50 binary classifier (wound vs non-wound)
+- **Hybrid Approach**: Combines U-Net and MedSAM masks via union/intersection/average
+
+### **Key Features**
+- K-fold cross-validation training
+- Test-time augmentation (TTA)
+- Adversarial training
+- Output calibration
+- Explainability (Grad-CAM, SHAP)
+- Clinical heuristics for severity assessment
+- PDF report generation
+- Optional voice summaries (gTTS)
+
+### **User Interfaces**
+- **Web API**: Flask-based REST API
+- **Desktop GUI**: Tkinter application
+- **CLI**: Command-line interface
+
+## 📁 Project Structure
+
+```
+wound-segmentation/
+├── models/                     # Model files
+│   └── simclr_unet_patch_wound.keras
+├── outputs/                    # Generated outputs
+├── reports/                    # PDF reports
+├── wound_progress_report/      # Progress tracking
+├── docs/                       # Documentation
+├── requirements.txt            # Python dependencies
+├── setup_environment.sh        # Automated setup
+├── health_check.py            # System validation
+├── Makefile                   # Convenient commands
+├── SETUP_GUIDE.md            # Detailed setup guide
+└── CONFIGURATION_PREVENTION.md # Prevention strategy
+```
+
+## 🔧 Configuration
+
+### **Environment Variables**
+Copy the example configuration:
+```bash
+cp env.example .env
+```
+
+Key settings in `.env`:
+```bash
+# Model Paths
+UNET_WEIGHTS_PATH=models/simclr_unet_patch_wound.keras
+MEDSAM_WEIGHTS_PATH=models/medsam_model.pth
+
+# Device Configuration
+DEVICE=auto  # Options: auto, cpu, gpu, mps
+
+# Feature Flags
+ENABLE_MEDSAM=true
+ENABLE_EXPLAINABILITY=true
+ENABLE_VOICE_SUMMARY=false
+```
+
+## 🧪 Testing & Validation
+
+### **Health Check**
+```bash
+python health_check.py
+```
+
+Validates:
+- ✅ Python version compatibility
+- ✅ All required packages
+- ✅ Tkinter functionality
+- ✅ GPU availability
+- ✅ Model files
+- ✅ Directory structure
+- ✅ Basic functionality tests
+
+### **Test Your Setup**
+```bash
+# Test GUI functionality
+make test-gui
+
+# Test complete pipeline
+make test
+
+# Test with your own image
+python test_wound_progress.py
+```
+
+## 🚨 Troubleshooting
+
+### **Common Issues & Solutions**
+
+#### 1. `ModuleNotFoundError: No module named '_tkinter'`
+```bash
+make setup  # Automated fix
+```
+
+#### 2. `ValueError: numpy.dtype size changed`
+```bash
+make setup  # Automated fix
+```
+
+#### 3. Model file not found
+```bash
+# Check if model files exist
+ls -la models/
+
+# Download models if needed
+make install-models
+```
+
+#### 4. GPU not detected
+```bash
+# Check GPU availability
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
+# Force CPU if needed
+export CUDA_VISIBLE_DEVICES=""
+```
+
+### **Getting Help**
+1. **Run health check**: `make check`
+2. **Check logs**: Look in `logs/` directory
+3. **Read documentation**: `SETUP_GUIDE.md`
+4. **Review troubleshooting**: `CONFIGURATION_PREVENTION.md`
+
+## 📚 Documentation
+
+- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Complete setup instructions
+- **[CONFIGURATION_PREVENTION.md](CONFIGURATION_PREVENTION.md)** - Prevention strategy
+- **[docs/](docs/)** - Technical documentation
+  - `PHASE_1_modular_terminal.md` - Modularization plan
+  - `tech_overview.md` - Technical architecture
+  - `modular-enhancement.md` - Enhancement roadmap
+
+## 🔄 Development Workflow
+
+### **Daily Workflow**
+```bash
+# Start work
+make check
+
+# Work on your code
+# ... your development ...
+
+# End work (no cleanup needed)
+```
+
+### **Adding Dependencies**
+1. Add to `requirements.txt` with pinned version
+2. Run `make check` to verify
+3. Test functionality
+
+### **Weekly Maintenance**
+```bash
+make check          # Verify environment
+make update-deps    # Check for updates
+```
+
+## 🎯 Model Sources
+
+- **MedSAM Model**: [Google Drive](https://drive.google.com/drive/search?q=medsam_vit_b.pth)
+- **Training Images**: [Kaggle Dataset](https://www.kaggle.com/datasets/leoscode/wound-segmentation-images)
+
+## 🏆 Features
+
+### **Segmentation**
+- U-Net segmentation with IoU metric
+- Optional ResNet34 U-Net ensemble
+- Hybrid U-Net + MedSAM (union/intersection/average)
+- TTA and uncertainty estimation
+- Visualizations: mask, contours, Grad-CAM, SHAP, edges
+
+### **Classification**
+- ResNet50 wound vs non-wound classifier
+- SimCLR pretraining pipeline + fine-tune
+
+### **Clinical Analytics**
+- Severity levels (Mild/Moderate/Severe)
+- Healing potential estimate
+- Area estimation
+- Quality checks and segmentation validation
+- Clinician/patient reports
+
+### **Reporting**
+- Patient-friendly PDF (image, mask, outline, explanations)
+- Clinician report with recommendations
+- Optional voice summary (gTTS)
+
+### **Interfaces**
+- Flask APIs for upload/serve
+- Web landing/UX analyzer
+- Desktop GUI for offline processing
+
+## 🔮 Roadmap
+
+### **Phase 1: Modularization** (Current)
+- Refactor into reusable Python package
+- Centralize configuration
+- Establish typed interfaces and logging
+- Create simple CLI
+
+### **Phase 2: Local Mac App**
+- Polish local desktop experience
+- Unify GUI and web UI
+- macOS integration
+
+### **Phase 3: AWS Hosted**
+- Containerize with Docker
+- Deploy on ECS
+- Maintain same UX as local version
+
+### **Phase 4: Enterprise Architecture**
+- Scale with managed AWS services
+- Advanced security and compliance
+- Multi-region deployment
+
+## 🤝 Contributing
+
+1. **Fork the repository**
+2. **Create a feature branch**: `git checkout -b feature-name`
+3. **Make your changes**
+4. **Run tests**: `make check && make test`
+5. **Commit changes**: `git commit -m "Add feature"`
+6. **Push to branch**: `git push origin feature-name`
+7. **Submit a pull request**
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- **MedSAM**: Medical SAM for medical image segmentation
+- **U-Net**: Convolutional networks for biomedical image segmentation
+- **TensorFlow**: Machine learning platform
+- **OpenCV**: Computer vision library
+
+## 📞 Support
+
+If you encounter issues:
+1. Check the troubleshooting section above
+2. Run `make check` for diagnostics
+3. Review the documentation in `docs/`
+4. Ensure all prerequisites are met
+
+---
+
+**Happy wound segmentation! 🏥✨**
+
+*For detailed setup instructions, see [SETUP_GUIDE.md](SETUP_GUIDE.md)*
+*For prevention strategies, see [CONFIGURATION_PREVENTION.md](CONFIGURATION_PREVENTION.md)*

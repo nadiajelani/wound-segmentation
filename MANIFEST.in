@@ -1,0 +1,66 @@
+# Include documentation
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+
+# Include configuration files
+include pyproject.toml
+include setup.py
+include requirements*.txt
+include pytest.ini
+include .env.template
+
+# Include CLI scripts
+include cli/ws_cli.py
+recursive-include cli *.py
+
+# Include package data
+recursive-include woundseg/config *.yaml *.json
+recursive-include woundseg/templates *.html
+recursive-include woundseg/static *
+
+# Include test files
+recursive-include tests *.py
+recursive-include tests/fixtures *
+recursive-include tests/integration *.py
+
+# Exclude unnecessary files
+exclude .gitignore
+exclude .DS_Store
+exclude *.pyc
+exclude __pycache__
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * .DS_Store
+
+# Exclude development files
+exclude .pre-commit-config.yaml
+exclude .github/
+recursive-exclude .github *
+
+# Exclude build artifacts
+exclude build/
+exclude dist/
+exclude *.egg-info/
+recursive-exclude build *
+recursive-exclude dist *
+recursive-exclude *.egg-info *
+
+# Exclude virtual environments
+recursive-exclude venv *
+recursive-exclude env *
+recursive-exclude wound_seg_env *
+
+# Exclude model files (too large for package)
+exclude models/*.keras
+exclude models/*.h5
+exclude models/*.pth
+exclude models/*.pt
+exclude models/*.pkl
+recursive-exclude models *.keras *.h5 *.pth *.pt *.pkl
+
+# Exclude output directories
+recursive-exclude outputs *
+recursive-exclude logs *
+recursive-exclude reports *

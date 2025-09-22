@@ -1,0 +1,25 @@
+# Synthetic Data Generation Dependencies
+# Include base requirements
+-r requirements.txt
+
+# Stable Diffusion and Transformers
+diffusers>=0.20.0,<1.0.0
+transformers>=4.25.0,<5.0.0
+accelerate>=0.20.0,<1.0.0
+
+# PyTorch Ecosystem
+torch>=1.13.0,<3.0.0
+torchvision>=0.14.0,<1.0.0
+torchaudio>=0.13.0,<3.0.0
+
+# Additional ML Libraries
+xformers>=0.0.16,<1.0.0
+bitsandbytes>=0.39.0,<1.0.0
+
+# Image Processing for Synthetic Data
+imageio>=2.19.0,<3.0.0
+imageio-ffmpeg>=0.4.7,<1.0.0
+
+# Data Generation Utilities
+datasets>=2.0.0,<3.0.0
+huggingface-hub>=0.15.0,<1.0.0

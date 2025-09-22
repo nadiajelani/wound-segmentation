@@ -1,0 +1,5 @@
+[console_scripts]
+ws = cli.ws_cli:app
+
+[gui_scripts]
+woundseg-gui = woundseg.gui:main

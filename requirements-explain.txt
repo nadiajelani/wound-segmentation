@@ -1,0 +1,25 @@
+# Explainability Dependencies
+# Include base requirements
+-r requirements.txt
+
+# SHAP (SHapley Additive exPlanations)
+shap>=0.41.0,<1.0.0
+
+# LIME (Local Interpretable Model-agnostic Explanations)
+lime>=0.2.0,<1.0.0
+
+# Grad-CAM and Visualizations
+grad-cam>=1.4.0,<2.0.0
+captum>=0.6.0,<1.0.0
+
+# Additional Explainability Tools
+lrp>=0.1.0,<1.0.0
+tf-explain>=0.3.0,<1.0.0
+
+# Visualization Libraries
+plotly>=5.0.0,<6.0.0
+bokeh>=2.4.0,<3.0.0
+
+# Statistical Analysis
+statsmodels>=0.13.0,<1.0.0
+scipy>=1.9.0,<2.0.0
