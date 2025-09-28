@@ -1,18 +1,89 @@
+# Python
 __pycache__/
 *.pyc
-/env/
-*.png
-/tfenv/
-/utils/
-/MedSAM/
-/wound_seg_env/
-/wound_seg_env/*
+*.pyo
+*.pyd
+.Python
+env/
 venv/
-/wound_env/
-/output/
-/offline_results/
-/wounds/
-*.pth
-*.h5simclr_unet_wound_segmentation.keras
-*.h5
+ENV/
+env.bak/
+venv.bak/
+
+# Virtual environments
+api_env/
+api_env_clean/
+wound_seg_env/
+wound_env/
+tfenv/
+
+# Large files (>50MB)
 *.keras
+*.h5
+*.pth
+*.pkl
+*.bin
+*.weights
+*.model
+
+# Model files and checkpoints
+models/
+checkpoints/
+*.ckpt
+*.safetensors
+
+# Output directories
+output/
+outputs/
+offline_results/
+wounds/
+logs/
+temp/
+tmp/
+
+# Data directories
+data/
+datasets/
+images/
+masks/
+reports/
+sessions/
+uploads/
+visualizations/
+
+# IDE and OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Git objects (large files)
+.git/objects/
+
+# Web assets
+web/venv/
+web/models/
+web/reports/
+web/static/
+
+# API logs
+*.log
+api_debug.log
+api_lifespan.log
+model_server.log
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Large image files
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
