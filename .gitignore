@@ -4,48 +4,35 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
 
-# Virtual environments
+# Virtual environments (only exclude the actual venv directories, not the code)
 api_env/
 api_env_clean/
 wound_seg_env/
 wound_env/
 tfenv/
+venv/
+env/
 
-# Large files (>50MB)
-*.keras
-*.h5
-*.pth
-*.pkl
-*.bin
-*.weights
-*.model
+# Large model files (>50MB) - exclude only the actual model weights
+models/simclr_unet_patch_wound.keras
+models/*.h5
+models/*.pth
+models/*.pkl
+models/*.bin
+models/*.weights
+models/*.model
+models/*.ckpt
+models/*.safetensors
 
-# Model files and checkpoints
-models/
-checkpoints/
-*.ckpt
-*.safetensors
-
-# Output directories
-output/
+# Output directories (generated files, not source code)
 outputs/
 offline_results/
-wounds/
 logs/
 temp/
 tmp/
 
-# Data directories
-data/
-datasets/
-images/
-masks/
+# Generated reports and sessions (not source code)
 reports/
 sessions/
 uploads/
@@ -61,16 +48,7 @@ visualizations/
 # Jupyter
 .ipynb_checkpoints/
 
-# Git objects (large files)
-.git/objects/
-
-# Web assets
-web/venv/
-web/models/
-web/reports/
-web/static/
-
-# API logs
+# API logs (generated files)
 *.log
 api_debug.log
 api_lifespan.log
@@ -81,9 +59,8 @@ model_server.log
 *.temp
 *~
 
-# Large image files
-*.png
-*.jpg
-*.jpeg
-*.tiff
-*.bmp
+# Large test images (keep small sample images)
+outputs/uploads/
+outputs/visualizations/
+outputs/reports/
+outputs/sessions/
