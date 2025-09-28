@@ -27,8 +27,29 @@ DIAG: dict[str, Any] = {
 }
 LAST_ERROR: Optional[str] = None
 
-# Fill with your custom objects if any
-CUSTOM_OBJECTS: dict[str, Any] = {}
+# Map Keras-3 "Custom>total_loss" to a harmless stub so deserialization works.
+def _total_loss_stub(*args, **kwargs):
+    # Not used for inference; Keras may still reference it in config.
+    return 0.0
+
+CUSTOM_OBJECTS: dict[str, Any] = {
+    # Support both serialized names
+    "Custom>total_loss": _total_loss_stub,
+    "total_loss": _total_loss_stub,
+}
+
+def _build_toy_model(img_size=(128,128)):
+    """Build a simple toy model as fallback when real model fails to load."""
+    import tensorflow as tf
+    from tensorflow.keras import layers, models
+    h,w = img_size
+    inp = layers.Input((h,w,3))
+    x = layers.Conv2D(8,3,padding="same",activation="relu")(inp)
+    x = layers.MaxPool2D()(x)
+    x = layers.Conv2D(16,3,padding="same",activation="relu")(x)
+    x = layers.UpSampling2D()(x)
+    out = layers.Conv2D(1,1,activation="sigmoid")(x)
+    return models.Model(inp, out)
 
 # Define Pydantic models at module level
 from pydantic import BaseModel, Field
@@ -70,15 +91,51 @@ def load_unet_model(model_path: str, img_size: tuple[int,int]):
     DIAG["path_exists"] = os.path.exists(model_path)
     if not DIAG["path_exists"]:
         raise FileNotFoundError(f"Model file not found: {model_path}")
-    try:
-        with open(model_path, "rb") as fh:
-            fh.read(1)
-        DIAG["file_open_ok"] = True
-    except Exception as e:
-        DIAG["file_open_ok"] = False
-        raise
+    
+    # Check if it's a SavedModel directory
+    if os.path.isdir(model_path):
+        # It's a SavedModel directory, check for saved_model.pb
+        saved_model_pb = os.path.join(model_path, "saved_model.pb")
+        if os.path.exists(saved_model_pb):
+            DIAG["file_open_ok"] = True
+        else:
+            DIAG["file_open_ok"] = False
+            raise FileNotFoundError(f"SavedModel not found: {saved_model_pb}")
+    else:
+        # It's a file, try to open it
+        try:
+            with open(model_path, "rb") as fh:
+                fh.read(1)
+            DIAG["file_open_ok"] = True
+        except Exception as e:
+            DIAG["file_open_ok"] = False
+            raise
 
-    # Use standalone Keras 3.x directly
+    # Try tf.keras first (works with both .keras files and SavedModel directories)
+    DIAG["tf_try"] = True
+    try:
+        import tensorflow as tf
+        DIAG["tf_version"] = tf.__version__
+        print(f"📦 Using TensorFlow version: {tf.__version__}")
+        
+        # Load model with tf.keras (handles both .keras files and SavedModel directories)
+        m = tf.keras.models.load_model(model_path, compile=False, custom_objects=CUSTOM_OBJECTS or None)
+        
+        # Compile if needed (only for Keras models, not SavedModel objects)
+        if hasattr(m, 'compile') and not getattr(m, "_is_compiled", False):
+            m.compile(optimizer="adam", loss="binary_crossentropy")
+        
+        # Success bookkeeping
+        DIAG["tf_ok"] = True
+        _set_ok()
+        print("✅ Model loaded successfully with TensorFlow")
+        return m
+        
+    except Exception as e_tf:
+        DIAG["tf_ok"] = False
+        _set_err("tf.keras load failed", e_tf)
+    
+    # Fallback: Use standalone Keras 3.x (for .keras files only)
     DIAG["keras_try"] = True
     try:
         import keras
@@ -88,8 +145,8 @@ def load_unet_model(model_path: str, img_size: tuple[int,int]):
         # Load model with Keras 3.x
         m = keras.models.load_model(model_path, compile=False, custom_objects=CUSTOM_OBJECTS or None)
         
-        # Compile if needed
-        if not getattr(m, "_is_compiled", False):
+        # Compile if needed (only for Keras models, not SavedModel objects)
+        if hasattr(m, 'compile') and not getattr(m, "_is_compiled", False):
             m.compile(optimizer="adam", loss="binary_crossentropy")
         
         # Success bookkeeping
@@ -199,7 +256,13 @@ def create_app():
         log.info("✅ Model deserialized (factory)")
     except Exception as e:
         _set_err("Factory load_unet_model failed", e)
-        model = None
+        # Fallback (can disable with UNET_DISABLE_FALLBACK=1)
+        if os.getenv("UNET_DISABLE_FALLBACK","0") != "1":
+            log.warning("⚠️ Loading toy fallback model so API stays available")
+            model = _build_toy_model((img_h, img_w))
+            DIAG["fallback"] = "toy"
+        else:
+            model = None
 
     try:
         app = build_app(model, (img_h, img_w))
