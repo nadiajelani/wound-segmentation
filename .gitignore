@@ -63,4 +63,11 @@ model_server.log
 outputs/uploads/
 outputs/visualizations/
 outputs/reports/
-outputs/sessions/
+outputs/sessions/# Virtual environments
+.venv_model/
+venv/
+api_env/
+api_env_clean/
+# Large model files
+models/simclr_unet_savedmodel/
+models/*.keras
