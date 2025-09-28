@@ -1,20 +1,21 @@
-# Free tier optimized requirements
-# Minimal dependencies for free hosting platforms
+# Free Tier Optimized Requirements
+# Minimal dependencies for wound detection API
 
-# Core Flask framework
+# Core web framework
 Flask==2.3.3
 Flask-CORS==4.0.0
 
-# Image processing (lightweight)
+# Image processing
 Pillow==10.0.1
 opencv-python-headless==4.8.1.78
+
+# Machine Learning (optimized versions)
+tensorflow-macos==2.14.0
+keras==3.0.5
 numpy==1.24.3
 
-# Machine learning (optimized for free tier)
-tensorflow==2.13.0
+# Utilities
+Werkzeug==2.3.7
 
-# HTTP server for production
+# Optional: for better performance
 gunicorn==21.2.0
-
-# Optional: For better performance on free tier
-# matplotlib==3.7.2  # Uncomment if needed for visualizations

@@ -1,21 +1,15 @@
-# Render deployment configuration for free tier
 services:
   - type: web
-    name: wound-detection-free
+    name: wound-detection-api
     env: python
     buildCommand: pip install -r requirements_free.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app_free:app
-    healthCheckPath: /health
+    startCommand: python app_free.py
     envVars:
-      - key: FLASK_ENV
-        value: production
       - key: SECRET_KEY
-        value: free-tier-secret-key-change-in-production
-      - key: CORS_ORIGINS
-        value: "*"
-      - key: MAX_CONTENT_LENGTH
-        value: "5242880"  # 5MB limit for free tier
+        value: your-secret-key-here
+      - key: PORT
+        value: 10000
     disk:
-      name: wound-detection-storage
+      name: model-storage
       mountPath: /app/models
       sizeGB: 1
