@@ -9,8 +9,8 @@ Flask-CORS==4.0.0
 Pillow==10.0.1
 opencv-python-headless==4.8.1.78
 
-# Machine Learning (optimized versions)
-tensorflow-macos==2.14.0
+# Machine Learning (cross-platform compatible)
+tensorflow==2.14.0
 keras==3.0.5
 numpy==1.24.3
 

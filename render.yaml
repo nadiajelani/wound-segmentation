@@ -6,7 +6,7 @@ services:
     startCommand: python app_free.py
     envVars:
       - key: SECRET_KEY
-        value: your-secret-key-here
+        generateValue: true
       - key: PORT
         value: 10000
     disk:
