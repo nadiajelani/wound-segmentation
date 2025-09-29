@@ -1,0 +1,24 @@
+# Railway Deployment Requirements
+# Optimized for Railway's infrastructure
+
+# Core web framework
+Flask==2.3.3
+Flask-CORS==4.0.0
+
+# Image processing
+Pillow==10.0.1
+opencv-python-headless==4.8.1.78
+
+# Machine Learning
+tensorflow==2.14.0
+keras==3.0.5
+numpy==1.24.3
+
+# Utilities
+Werkzeug==2.3.7
+
+# Production server (Railway uses its own)
+gunicorn==21.2.0
+
+# Additional dependencies for Railway
+psutil==5.9.6
