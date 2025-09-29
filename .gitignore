@@ -13,6 +13,7 @@ wound_env/
 tfenv/
 venv/
 env/
+.venv_model/
 
 # Large model files (>50MB) - exclude only the actual model weights
 models/simclr_unet_patch_wound.keras
@@ -24,6 +25,10 @@ models/*.weights
 models/*.model
 models/*.ckpt
 models/*.safetensors
+models/simclr_unet_savedmodel/
+models/checkpoints/
+models/offline_results/
+models/wound_progress_report/
 
 # Output directories (generated files, not source code)
 outputs/
@@ -63,11 +68,20 @@ model_server.log
 outputs/uploads/
 outputs/visualizations/
 outputs/reports/
-outputs/sessions/# Virtual environments
-.venv_model/
-venv/
-api_env/
-api_env_clean/
-# Large model files
-models/simclr_unet_savedmodel/
-models/*.keras
+outputs/sessions/
+
+# Large data files and archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+unet_images.zip
+
+# Large segment-anything submodule (40M+)
+segment-anything/
+
+# Storage directories with large files
+storage/
+
+# Large Jupyter notebooks with outputs
+*.ipynb
