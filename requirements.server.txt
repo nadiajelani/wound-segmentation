@@ -1,0 +1,24 @@
+# requirements.server.txt - Server-only stack (no tkinter, GUI stuff)
+# Tested combo for Railway deployment
+
+# Core ML stack
+tensorflow==2.12.0
+numpy==1.23.5
+pandas==1.5.3
+opencv-python-headless==4.8.1.78
+scikit-image==0.21.0
+scikit-learn==1.3.2
+scipy==1.10.1
+albumentations==1.3.1
+segmentation-models==1.0.1
+
+# Web stack (Flask for app_clean.py)
+flask==3.0.0
+flask-cors==4.0.0
+flask-limiter==3.5.1
+fpdf==1.7.2
+gunicorn==21.2.0
+
+# Additional utilities
+pillow==10.0.1
+h5py==3.9.0
