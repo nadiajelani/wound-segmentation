@@ -598,21 +598,53 @@
                         headers: { 'Content-Type': 'multipart/form-data' }
                     });
 
-                    originalImage.src = 'data:image/png;base64,' + response.data.image_base64;
-                    maskImage.src = 'data:image/png;base64,' + response.data.mask_base64;
-                    gradcamImage.src = 'data:image/png;base64,' + response.data.gradcam_base64;
-                    reportLink.href = response.data.report_url || '#';
-                    reportLink.style.display = response.data.report_url ? 'block' : 'none';
-                    metrics.textContent = JSON.stringify(response.data.metrics, null, 2);
-                    healingPrediction.textContent = `Severity: ${response.data.severity}\nHealing Potential: ${response.data.healing_potential}`;
-                    qualityResult.textContent = response.data.quality_result.message;
-                    validationResult.textContent = response.data.validation_result.message;
+                    if (response.data.success) {
+                        // Display original image
+                        if (response.data.images && response.data.images.original) {
+                            originalImage.src = 'data:image/png;base64,' + response.data.images.original;
+                        }
+                        
+                        // Display segmentation mask
+                        if (response.data.images && response.data.images.mask) {
+                            maskImage.src = 'data:image/png;base64,' + response.data.images.mask;
+                        }
+                        
+                        // Hide gradcam for now (not implemented in current API)
+                        gradcamImage.style.display = 'none';
+                        
+                        // Set report link
+                        if (response.data.files && response.data.files.report_url) {
+                            reportLink.href = response.data.files.report_url;
+                            reportLink.style.display = 'block';
+                        } else {
+                            reportLink.style.display = 'none';
+                        }
+                        
+                        // Display analysis results
+                        if (response.data.analysis) {
+                            const analysis = response.data.analysis;
+                            metrics.textContent = JSON.stringify({
+                                severity: analysis.severity,
+                                healing_potential: analysis.healing_potential,
+                                wound_area_mm2: analysis.wound_area_mm2,
+                                confidence: analysis.confidence
+                            }, null, 2);
+                            
+                            healingPrediction.textContent = `Severity: ${analysis.severity}\nHealing Potential: ${analysis.healing_potential}\nWound Area: ${analysis.wound_area_mm2.toFixed(2)} mm²`;
+                        }
+                        
+                        // Hide quality and validation results for now
+                        qualityResult.textContent = 'Quality check not implemented in current version';
+                        validationResult.textContent = 'Validation not implemented in current version';
 
-                    loading.style.display = 'none';
-                    resultsModal.show();
+                        loading.style.display = 'none';
+                        resultsModal.show();
+                    } else {
+                        throw new Error(response.data.error || 'Unknown error occurred');
+                    }
                 } catch (error) {
                     console.error('Error processing image:', error);
-                    alert('Failed to process image. Please try again.');
+                    alert('Failed to process image: ' + (error.response?.data?.error || error.message || 'Please try again.'));
                     loading.style.display = 'none';
                 } finally {
                     processButton.disabled = false;

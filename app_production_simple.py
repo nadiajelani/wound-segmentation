@@ -1,5 +1,5 @@
 """
-Production-ready wound detection API with SimCLR model integration
+Simplified production-ready wound detection API with SimCLR model integration
 """
 import os
 import time
@@ -19,17 +19,11 @@ import base64
 import io
 from PIL import Image
 
-# Import your existing modules
-from wound_medsam import predict_healing_potential, load_medsam_model, medsam_segment
-from woundseg.config import Config
-from model_loader import SimCLRModelLoader
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/app/logs/app.log'),
         logging.StreamHandler()
     ]
 )
@@ -53,18 +47,16 @@ limiter = Limiter(
 )
 
 # File upload configuration
-UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', '/app/uploads')
-REPORT_FOLDER = os.getenv('REPORT_FOLDER', '/app/reports')
+UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+REPORT_FOLDER = os.getenv('REPORT_FOLDER', 'reports')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'}
 
 # Create directories
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORT_FOLDER, exist_ok=True)
-os.makedirs('/app/logs', exist_ok=True)
 
 # Global model variables
 simclr_loader = None
-medsam_model = None
 
 def allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
@@ -97,23 +89,44 @@ def mask_to_base64(mask: np.ndarray) -> str:
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return img_str
 
+def predict_healing_potential(mask: np.ndarray, image: np.ndarray) -> Tuple[str, str, float]:
+    """Simplified healing potential prediction"""
+    # Calculate wound area in pixels
+    wound_pixels = np.sum(mask > 0)
+    total_pixels = mask.shape[0] * mask.shape[1]
+    wound_percentage = (wound_pixels / total_pixels) * 100
+    
+    # Estimate area in mm² (assuming 1 pixel = 0.1mm)
+    wound_area_mm2 = wound_pixels * 0.01
+    
+    # Simple severity classification
+    if wound_percentage < 1:
+        severity = "Minor"
+    elif wound_percentage < 5:
+        severity = "Moderate"
+    else:
+        severity = "Severe"
+    
+    # Simple healing potential
+    if wound_percentage < 2:
+        healing_potential = "Good"
+    elif wound_percentage < 5:
+        healing_potential = "Fair"
+    else:
+        healing_potential = "Poor"
+    
+    return severity, healing_potential, wound_area_mm2
+
 def load_models():
     """Load AI models on startup"""
-    global simclr_loader, medsam_model
+    global simclr_loader
     
     try:
         # Load SimCLR U-Net model using the model loader
+        from model_loader import SimCLRModelLoader
         simclr_loader = SimCLRModelLoader()
         simclr_loader.load_model()
         logger.info("SimCLR U-Net model loaded successfully")
-        
-        # Load MedSAM model (optional)
-        medsam_model_path = os.getenv('MEDSAM_MODEL_PATH')
-        if medsam_model_path and os.path.exists(medsam_model_path):
-            medsam_model = load_medsam_model(medsam_model_path)
-            logger.info("MedSAM model loaded successfully")
-        else:
-            logger.warning("MedSAM model not found, using SimCLR U-Net only")
             
     except Exception as e:
         logger.error(f"Error loading models: {str(e)}")

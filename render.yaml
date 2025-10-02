@@ -2,14 +2,18 @@ services:
   - type: web
     name: wound-detection-api
     env: python
-    buildCommand: pip install -r requirements_free.txt
-    startCommand: python app_free.py
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app_production.py
     envVars:
       - key: SECRET_KEY
-        generateValue: true
-      - key: PORT
-        value: 10000
-    disk:
-      name: model-storage
-      mountPath: /app/models
-      sizeGB: 1
+        value: your-secret-key-here
+      - key: CORS_ORIGINS
+        value: https://your-frontend-domain.com
+      - key: SIMCLR_MODEL_PATH
+        value: models/simclr_unet_patch_wound.keras
+      - key: MAX_CONTENT_LENGTH
+        value: "16777216"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: FILE_CLEANUP_HOURS
+        value: "24"

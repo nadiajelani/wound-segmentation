@@ -1,0 +1,27 @@
+# Core Flask dependencies
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-Limiter==3.5.0
+
+# Machine Learning - TF 2.14 + Keras 3 stack
+tensorflow==2.14.0
+numpy==1.24.3
+ml-dtypes==0.2.0
+h5py
+
+# Standalone Keras 3 (do NOT let pip pull tf-keras)
+keras==3.0.5
+
+# Image processing
+opencv-python-headless==4.8.1.78
+Pillow==10.0.1
+
+# PDF generation
+fpdf2==2.7.6
+
+# Utilities
+python-dotenv==1.0.0
+werkzeug==2.3.7
+
+# Production server
+gunicorn==21.2.0

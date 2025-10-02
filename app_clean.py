@@ -1,5 +1,5 @@
 """
-Production-ready wound detection API with SimCLR model integration
+Clean wound detection API with SimCLR U-Net only (no MedSAM)
 """
 import os
 import time
@@ -13,25 +13,20 @@ import cv2
 import numpy as np
 import tensorflow as tf
 from werkzeug.utils import secure_filename
-import shutil
 from typing import Dict, Any, Tuple, Optional
 import base64
 import io
 from PIL import Image
 
-# Import your existing modules
-from wound_medsam import predict_healing_potential, load_medsam_model, medsam_segment
-from woundseg.config import Config
-from model_loader import SimCLRModelLoader
+# Set matplotlib backend to headless for production
+import matplotlib
+matplotlib.use('Agg')
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/app/logs/app.log'),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
@@ -47,24 +42,22 @@ CORS(app, origins=CORS_ORIGINS)
 
 # Rate limiting
 limiter = Limiter(
-    app,
     key_func=get_remote_address,
     default_limits=[f"{os.getenv('RATE_LIMIT_PER_MINUTE', '10')} per minute"]
 )
+limiter.init_app(app)
 
 # File upload configuration
-UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', '/app/uploads')
-REPORT_FOLDER = os.getenv('REPORT_FOLDER', '/app/reports')
+UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+REPORT_FOLDER = os.getenv('REPORT_FOLDER', 'reports')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'}
 
 # Create directories
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORT_FOLDER, exist_ok=True)
-os.makedirs('/app/logs', exist_ok=True)
 
 # Global model variables
 simclr_loader = None
-medsam_model = None
 
 def allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
@@ -97,26 +90,51 @@ def mask_to_base64(mask: np.ndarray) -> str:
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return img_str
 
+def predict_healing_potential(mask: np.ndarray, image: np.ndarray) -> Tuple[str, str, float]:
+    """Simplified healing potential prediction based on wound area and characteristics"""
+    # Calculate wound area in pixels
+    wound_pixels = np.sum(mask > 0)
+    total_pixels = mask.shape[0] * mask.shape[1]
+    wound_percentage = (wound_pixels / total_pixels) * 100
+    
+    # Estimate area in mm² (assuming 1 pixel = 0.1mm)
+    wound_area_mm2 = wound_pixels * 0.01
+    
+    # Calculate wound characteristics
+    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    num_contours = len(contours)
+    
+    # Simple severity classification based on area and shape
+    if wound_percentage < 1:
+        severity = "Minor"
+    elif wound_percentage < 3:
+        severity = "Moderate"
+    else:
+        severity = "Severe"
+    
+    # Healing potential based on wound characteristics
+    if wound_percentage < 1.5 and num_contours <= 2:
+        healing_potential = "Excellent"
+    elif wound_percentage < 3 and num_contours <= 3:
+        healing_potential = "Good"
+    elif wound_percentage < 5:
+        healing_potential = "Fair"
+    else:
+        healing_potential = "Poor"
+    
+    return severity, healing_potential, wound_area_mm2
+
 def load_models():
-    """Load AI models on startup"""
-    global simclr_loader, medsam_model
+    """Load SimCLR U-Net model"""
+    global simclr_loader
     
     try:
-        # Load SimCLR U-Net model using the model loader
+        from model_loader import SimCLRModelLoader
         simclr_loader = SimCLRModelLoader()
         simclr_loader.load_model()
         logger.info("SimCLR U-Net model loaded successfully")
-        
-        # Load MedSAM model (optional)
-        medsam_model_path = os.getenv('MEDSAM_MODEL_PATH')
-        if medsam_model_path and os.path.exists(medsam_model_path):
-            medsam_model = load_medsam_model(medsam_model_path)
-            logger.info("MedSAM model loaded successfully")
-        else:
-            logger.warning("MedSAM model not found, using SimCLR U-Net only")
-            
     except Exception as e:
-        logger.error(f"Error loading models: {str(e)}")
+        logger.error(f"Error loading SimCLR model: {str(e)}")
         raise
 
 def cleanup_old_files():
@@ -125,16 +143,17 @@ def cleanup_old_files():
     cutoff_time = datetime.now() - timedelta(hours=cleanup_hours)
     
     for folder in [UPLOAD_FOLDER, REPORT_FOLDER]:
-        for filename in os.listdir(folder):
-            file_path = os.path.join(folder, filename)
-            if os.path.isfile(file_path):
-                file_time = datetime.fromtimestamp(os.path.getctime(file_path))
-                if file_time < cutoff_time:
-                    try:
-                        os.remove(file_path)
-                        logger.info(f"Cleaned up old file: {filename}")
-                    except Exception as e:
-                        logger.warning(f"Could not remove {filename}: {str(e)}")
+        if os.path.exists(folder):
+            for filename in os.listdir(folder):
+                file_path = os.path.join(folder, filename)
+                if os.path.isfile(file_path):
+                    file_time = datetime.fromtimestamp(os.path.getctime(file_path))
+                    if file_time < cutoff_time:
+                        try:
+                            os.remove(file_path)
+                            logger.info(f"Cleaned up old file: {filename}")
+                        except Exception as e:
+                            logger.warning(f"Could not remove {filename}: {str(e)}")
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -154,6 +173,15 @@ def readiness_check():
     return jsonify({
         'status': 'ready',
         'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/diag', methods=['GET'])
+def diag():
+    """Diagnostic info about model status"""
+    info = simclr_loader.get_model_info() if simclr_loader else {"status": "not_loaded"}
+    return jsonify({
+        "models_loaded": simclr_loader is not None,
+        "simclr_info": info
     })
 
 @app.route('/upload', methods=['POST'])
@@ -206,7 +234,10 @@ def process_wound_image(image_path: str, filename: str) -> Dict[str, Any]:
         
         # Convert to RGB and normalize
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) / 255.0
-        img_resized = tf.image.resize(img_rgb, (128, 128))[None, ...]
+        
+        # Use the loader's input shape (H,W)
+        target_h, target_w = simclr_loader.input_shape[:2]
+        img_resized = tf.image.resize(img_rgb, (target_h, target_w))[None, ...]
         
         # Predict with SimCLR U-Net
         pred = simclr_loader.predict(img_resized)[0, ..., 0]
@@ -268,33 +299,33 @@ def process_wound_image(image_path: str, filename: str) -> Dict[str, Any]:
         raise
 
 def create_visualization(image: np.ndarray, mask: np.ndarray, output_path: str):
-    """Create visualization of wound analysis"""
-    import matplotlib.pyplot as plt
-    
+    """Create visualization of wound analysis using OpenCV only (no matplotlib)"""
+    # Convert image to uint8 if needed
     img_rgb = (image * 255).astype(np.uint8) if image.max() <= 1.0 else image.copy()
+    
+    # Find contours
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contour_img = img_rgb.copy()
     cv2.drawContours(contour_img, contours, -1, (0, 255, 0), 2)
     
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 3, 1)
-    plt.imshow(img_rgb)
-    plt.title("Original Image")
-    plt.axis('off')
+    # Create a simple visualization using OpenCV only
+    # Resize images to same height for concatenation
+    height = 300
+    img_resized = cv2.resize(img_rgb, (height, height))
+    mask_resized = cv2.resize(mask, (height, height))
+    mask_colored = cv2.applyColorMap(mask_resized, cv2.COLORMAP_JET)
+    contour_resized = cv2.resize(contour_img, (height, height))
     
-    plt.subplot(1, 3, 2)
-    plt.imshow(mask, cmap='gray')
-    plt.title("Detected Wound Area")
-    plt.axis('off')
+    # Create horizontal concatenation
+    visualization = np.hstack([img_resized, mask_colored, contour_resized])
     
-    plt.subplot(1, 3, 3)
-    plt.imshow(contour_img)
-    plt.title("Wound Outline")
-    plt.axis('off')
+    # Add text labels
+    cv2.putText(visualization, "Original", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(visualization, "Wound Area", (height + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(visualization, "Outline", (2*height + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
     
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    # Save the visualization
+    cv2.imwrite(output_path, visualization)
 
 def generate_pdf_report(image, mask, severity, healing_potential, wound_area, report_path, vis_path):
     """Generate PDF report"""
