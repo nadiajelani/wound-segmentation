@@ -13,6 +13,78 @@ venv/
 /offline_results/
 /wounds/
 *.pth
-*.h5simclr_unet_wound_segmentation.keras
 *.h5
 *.keras
+env/
+.venv_model/
+
+# Large model files (>50MB) - exclude only the actual model weights
+models/*.keras  # Exclude all keras model files for Railway deployment
+models/*.h5
+models/*.pth
+models/*.pkl
+models/*.bin
+models/*.weights
+models/*.model
+models/*.ckpt
+models/*.safetensors
+models/simclr_unet_savedmodel/
+models/checkpoints/
+models/offline_results/
+models/wound_progress_report/
+
+# Output directories (generated files, not source code)
+outputs/
+offline_results/
+logs/
+temp/
+tmp/
+
+# Generated reports and sessions (not source code)
+reports/
+sessions/
+uploads/
+visualizations/
+
+# IDE and OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# API logs (generated files)
+*.log
+api_debug.log
+api_lifespan.log
+model_server.log
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Large test images (keep small sample images)
+outputs/uploads/
+outputs/visualizations/
+outputs/reports/
+outputs/sessions/
+
+# Large data files and archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+unet_images.zip
+
+# Large segment-anything submodule (40M+)
+segment-anything/
+
+# Storage directories with large files
+storage/
+
+# Large Jupyter notebooks with outputs
+*.ipynb
