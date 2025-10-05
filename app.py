@@ -6,6 +6,9 @@ import os
 import sys
 import time
 import logging
+import urllib.request
+import hashlib
+from pathlib import Path
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -45,51 +48,57 @@ CORS(app, origins=["*"])
 MODEL = None
 MODEL_LOADED = False
 
+def _log(msg): 
+    logger.info(f"[MODEL] {msg}")
+
+def _download(url: str, dst: str) -> bool:
+    try:
+        Path(os.path.dirname(dst)).mkdir(parents=True, exist_ok=True)
+        _log(f"Downloading model from {url} -> {dst}")
+        urllib.request.urlretrieve(url, dst)  # simple, works on Railway
+        size = os.path.getsize(dst)
+        _log(f"Download complete: {size:,} bytes")
+        return True
+    except Exception as e:
+        logger.error(f"[MODEL] Download failed: {e}")
+        return False
+
 def load_model():
-    """Load the wound segmentation model (TensorFlow 2.12 + tf.keras only)"""
+    """Load the wound segmentation model with download capability"""
     global MODEL, MODEL_LOADED
-    if MODEL_LOADED:
+    if MODEL_LOADED and MODEL is not None:
         return True
 
-    try:
-        logger.info("Loading wound segmentation model...")
-        model_path = os.getenv('SIMCLR_MODEL_PATH', '/app/models/simclr_unet_patch_wound.keras')
-        
-        logger.info(f"Looking for model at: {model_path}")
-        logger.info(f"Model file exists: {os.path.exists(model_path)}")
-        
-        if not os.path.exists(model_path):
-            logger.error(f"❌ Model not found at {model_path}")
-            logger.error(f"Available files in /app/models/: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Directory not found'}")
+    model_path = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
+    model_url  = os.getenv("SIMCLR_MODEL_URL", "").strip()
+
+    _log(f"Requested path: {model_path}")
+    _log(f"Download URL set: {bool(model_url)}")
+
+    if not os.path.exists(model_path):
+        if model_url:
+            if not _download(model_url, model_path):
+                _log("Model missing and download failed, using fallback")
+                MODEL_LOADED = False
+                return False
+        else:
+            _log("Model missing and no SIMCLR_MODEL_URL provided, using fallback")
+            MODEL_LOADED = False
             return False
 
-        # IMPORTANT: use tf.keras, not standalone keras
+    try:
         custom_objects = {
-            'Custom>total_loss': lambda *args, **kwargs: 0.0,
-            'total_loss': lambda *args, **kwargs: 0.0,
+            'Custom>total_loss': lambda *a, **k: 0.0,
+            'total_loss': lambda *a, **k: 0.0,
         }
-
-        logger.info(f"Loading model with custom objects: {list(custom_objects.keys())}")
-        MODEL = tf.keras.models.load_model(
-            model_path,
-            compile=False,
-            custom_objects=custom_objects,
-            safe_mode=False
-        )
-        
-        logger.info(f"Model input shape: {MODEL.input_shape}")
-        logger.info(f"Model output shape: {MODEL.output_shape}")
-        logger.info(f"Model summary: {MODEL.summary()}")
-
+        _log("Loading model from disk...")
+        mdl = tf.keras.models.load_model(model_path, compile=False, custom_objects=custom_objects)
         MODEL_LOADED = True
-        logger.info("✅ Model loaded successfully (tf.keras)")
+        MODEL = mdl
+        _log("✅ Model loaded successfully")
         return True
-
     except Exception as e:
-        logger.error(f"❌ Model loading failed: {e}")
-        logger.error(f"Error type: {type(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.exception("[MODEL] Deserialization failed")
         MODEL = None
         MODEL_LOADED = False
         return False
@@ -231,6 +240,22 @@ def debug_info():
         "model_path_files": os.listdir(os.path.dirname(model_path)) if os.path.exists(os.path.dirname(model_path)) else "Directory not found",
         "model_input_shape": MODEL.input_shape if MODEL else None,
         "model_output_shape": MODEL.output_shape if MODEL else None,
+        "timestamp": datetime.now().isoformat()
+    })
+
+@app.route("/diag", methods=['GET'])
+def diag():
+    """Diagnostics endpoint to see what the container sees"""
+    p = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
+    exists = os.path.exists(p)
+    size = os.path.getsize(p) if exists else 0
+    return jsonify({
+        "model_loaded": MODEL_LOADED,
+        "path": p,
+        "exists": exists,
+        "size_bytes": size,
+        "url_set": bool(os.getenv("SIMCLR_MODEL_URL", "").strip()),
+        "model_url": os.getenv("SIMCLR_MODEL_URL", "").strip() or "Not set",
         "timestamp": datetime.now().isoformat()
     })
 
