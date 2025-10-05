@@ -22,11 +22,9 @@ RUN curl -L -o /app/models/simclr_unet_patch_wound.keras \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements_railway.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements_railway.txt
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
@@ -34,7 +32,7 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p uploads reports logs
 
-# Set environment variables
+# Set environment variables (no build secrets - all runtime)
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
@@ -46,4 +44,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:$PORT/health || exit 1
 
 # Run the application with Gunicorn
-CMD ["gunicorn", "-b", "0.0.0.0:${PORT}", "app_free:app", "--timeout", "180", "--workers", "1"]
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:${PORT}", "app_free:app", "--timeout", "180"]
