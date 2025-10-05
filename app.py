@@ -3,6 +3,7 @@ Free Tier Optimized Wound Detection API
 Optimized for Railway deployment (Python 3.10 + TF 2.12)
 """
 import os
+import sys
 import time
 import logging
 from datetime import datetime
@@ -24,6 +25,12 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Log startup
+logger.info("🔥 Wound Segmentation API Starting Up...")
+logger.info(f"Python version: {sys.version}")
+logger.info(f"TensorFlow version: {tf.__version__}")
+logger.info(f"Working directory: {os.getcwd()}")
 
 app = Flask(__name__)
 
@@ -296,10 +303,18 @@ def static_files(filename):
 
 if __name__ == '__main__':
     # Load model on startup
-    load_model()
+    logger.info("🚀 Starting application...")
+    logger.info("📦 Attempting to load model on startup...")
+    
+    model_loaded = load_model()
+    if model_loaded:
+        logger.info("✅ Model loaded successfully on startup")
+    else:
+        logger.error("❌ Model failed to load on startup")
     
     # Get port from environment (Railway requirement)
     port = int(os.environ.get('PORT', 8080))
+    logger.info(f"🌐 Starting Flask application on port {port}...")
     
     # Run the app
     app.run(host='0.0.0.0', port=port, debug=False)
