@@ -7,8 +7,10 @@ import sys
 import time
 import logging
 import urllib.request
+import urllib.error
 import hashlib
 import ssl
+import json
 from pathlib import Path
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
@@ -52,60 +54,120 @@ MODEL_LOADED = False
 def _log(msg): 
     logger.info(f"[MODEL] {msg}")
 
-def download_file(url, dest_path):
-    """Download file with proper headers and authentication"""
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    token = os.getenv("GITHUB_TOKEN", "").strip()
+GITHUB_API = "https://api.github.com"
 
-    # GitHub expects a real UA; add Authorization if token is present (works for public & private)
-    headers = {
-        "User-Agent": "wound-segmentation/1.0 (+https://github.com/nadiajelani/wound-segmentation)",
-        "Accept": "application/octet-stream"
-    }
-    if token:
-        headers["Authorization"] = f"token {token}"
-
-    req = urllib.request.Request(url, headers=headers)
-
-    # Some platforms lack cert bundles; this keeps it robust
+def _http_get(url, headers, dest_path):
     ctx = ssl.create_default_context()
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, context=ctx) as r, open(dest_path, "wb") as f:
         shutil.copyfileobj(r, f)
 
+def _headers_for_download():
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    headers = {
+        "User-Agent": "wound-segmentation/1.0",
+        "Accept": "application/octet-stream",
+    }
+    if token:
+        # Works with classic and fine-grained tokens
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+def download_model_with_fallbacks(model_url, dest_path, repo_full="nadiajelani/wound-segmentation",
+                                  tag="v1.0.0", asset_name="simclr_unet_patch_wound.keras"):
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    headers = _headers_for_download()
+
+    # 1) Try provided URL first (trimmed)
+    url_candidates = [model_url.strip()] if model_url else []
+
+    # 2) Common GitHub URL variants
+    url_candidates += [
+        f"https://github.com/{repo_full}/releases/download/{tag}/{asset_name}",
+        f"https://github.com/{repo_full}/releases/download/v1.0/{asset_name}",
+        f"https://github.com/{repo_full}/releases/latest/download/{asset_name}",
+    ]
+
+    # try each direct URL
+    for u in url_candidates:
+        if not u:
+            continue
+        try:
+            _http_get(u, headers, dest_path)
+            return True
+        except urllib.error.HTTPError as e:
+            # 404 is common; try next
+            continue
+        except Exception:
+            continue
+
+    # 3) API path: find asset by name, then download by assets/:id
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if not token:
+        # cannot use API fallback without token
+        return False
+
+    # get release by tag; if that fails, fall back to 'latest'
+    rel_urls = [
+        f"{GITHUB_API}/repos/{repo_full}/releases/tags/{tag}",
+        f"{GITHUB_API}/repos/{repo_full}/releases/latest",
+    ]
+    api_headers = {
+        "User-Agent": "wound-segmentation/1.0",
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+    }
+
+    for rel_url in rel_urls:
+        try:
+            req = urllib.request.Request(rel_url, headers=api_headers)
+            with urllib.request.urlopen(req) as r:
+                release = json.loads(r.read().decode("utf-8"))
+            assets = release.get("assets", [])
+            asset = next((a for a in assets if a.get("name") == asset_name), None)
+            if not asset:
+                continue
+            asset_id = asset["id"]
+            asset_api_url = f"{GITHUB_API}/repos/{repo_full}/releases/assets/{asset_id}"
+            # Note the special Accept to stream the file
+            stream_headers = dict(api_headers)
+            stream_headers["Accept"] = "application/octet-stream"
+            _http_get(asset_api_url, stream_headers, dest_path)
+            return True
+        except Exception:
+            continue
+
+    return False
+
 def load_model():
-    """Load the wound segmentation model with improved download capability"""
     global MODEL, MODEL_LOADED
     if MODEL_LOADED:
         return True
     try:
         logger.info("📦 Loading wound segmentation model...")
         model_path = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
-        model_url  = os.getenv("SIMCLR_MODEL_URL", "").strip()
-
-        # If file missing, try to download
-        if not os.path.exists(model_path):
-            if model_url:
-                logger.info(f"[MODEL] Downloading from {model_url} -> {model_path}")
-                download_file(model_url, model_path)
-                logger.info("[MODEL] Download complete")
+        model_url  = os.getenv("SIMCLR_MODEL_URL", "")
+        tag        = os.getenv("SIMCLR_MODEL_TAG", "v1.0.0")
+        repo_full  = os.getenv("SIMCLR_MODEL_REPO", "nadiajelani/wound-segmentation")
+        asset_name = os.getenv("SIMCLR_MODEL_ASSET", "simclr_unet_patch_wound.keras")
 
         if not os.path.exists(model_path):
-            logger.error("[MODEL] Model file still missing after download")
-            return False
+            logger.info(f"[MODEL] Attempting download -> {model_path}")
+            ok = download_model_with_fallbacks(model_url, model_path,
+                                               repo_full=repo_full, tag=tag, asset_name=asset_name)
+            if not ok:
+                logger.error("[MODEL] Download failed via all methods")
+                return False
 
-        # ---- Keras/TensorFlow load (TF 2.12 compatible) ----
-        import tensorflow as tf
-        import keras
+        import keras, tensorflow as tf
         os.environ["KERAS_BACKEND"] = "tensorflow"
         os.environ["TF_USE_LEGACY_KERAS"] = "0"
-
         custom_objects = {
             "Custom>total_loss": lambda *a, **k: 0.0,
             "total_loss": lambda *a, **k: 0.0,
         }
-        MODEL = keras.models.load_model(
-            model_path, compile=False, safe_mode=False, custom_objects=custom_objects
-        )
+        MODEL = keras.models.load_model(model_path, compile=False, safe_mode=False,
+                                        custom_objects=custom_objects)
         MODEL_LOADED = True
         logger.info("✅ Model loaded successfully")
         return True
