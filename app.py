@@ -93,8 +93,11 @@ GITHUB_API = "https://api.github.com"
 def _http_get(url, headers, dest_path):
     ctx = ssl.create_default_context()
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, context=ctx) as r, open(dest_path, "wb") as f:
+    # Set a longer timeout for large model downloads (10 minutes)
+    logger.info(f"[MODEL] Starting download from {url} (timeout: 600s)")
+    with urllib.request.urlopen(req, context=ctx, timeout=600) as r, open(dest_path, "wb") as f:
         shutil.copyfileobj(r, f)
+    logger.info(f"[MODEL] Download completed successfully to {dest_path}")
 
 def _headers_for_download():
     token = os.getenv("GITHUB_TOKEN", "").strip()
