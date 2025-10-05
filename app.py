@@ -47,9 +47,13 @@ def load_model():
     try:
         logger.info("Loading wound segmentation model...")
         model_path = os.getenv('SIMCLR_MODEL_PATH', '/app/models/simclr_unet_patch_wound.keras')
-
+        
+        logger.info(f"Looking for model at: {model_path}")
+        logger.info(f"Model file exists: {os.path.exists(model_path)}")
+        
         if not os.path.exists(model_path):
-            logger.warning(f"Model not found at {model_path}; falling back")
+            logger.error(f"❌ Model not found at {model_path}")
+            logger.error(f"Available files in /app/models/: {os.listdir('/app/models/') if os.path.exists('/app/models/') else 'Directory not found'}")
             return False
 
         # IMPORTANT: use tf.keras, not standalone keras
@@ -58,11 +62,17 @@ def load_model():
             'total_loss': lambda *args, **kwargs: 0.0,
         }
 
+        logger.info(f"Loading model with custom objects: {list(custom_objects.keys())}")
         MODEL = tf.keras.models.load_model(
             model_path,
             compile=False,
-            custom_objects=custom_objects
+            custom_objects=custom_objects,
+            safe_mode=False
         )
+        
+        logger.info(f"Model input shape: {MODEL.input_shape}")
+        logger.info(f"Model output shape: {MODEL.output_shape}")
+        logger.info(f"Model summary: {MODEL.summary()}")
 
         MODEL_LOADED = True
         logger.info("✅ Model loaded successfully (tf.keras)")
@@ -70,6 +80,9 @@ def load_model():
 
     except Exception as e:
         logger.error(f"❌ Model loading failed: {e}")
+        logger.error(f"Error type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         MODEL = None
         MODEL_LOADED = False
         return False
@@ -105,32 +118,43 @@ def predict_wound_mask(image_array):
     """Predict wound mask using the loaded model"""
     global MODEL, MODEL_LOADED
     
+    logger.info(f"Predicting wound mask - Model loaded: {MODEL_LOADED}, Model exists: {MODEL is not None}")
+    logger.info(f"Input image shape: {image_array.shape}")
+    
     if not MODEL_LOADED or MODEL is None:
-        logger.warning("Model not loaded, using fallback prediction")
+        logger.error("❌ Model not loaded, using fallback prediction")
         # Return a simple fallback mask
         h, w = image_array.shape[1], image_array.shape[2]
         mask = np.zeros((h, w), dtype=np.uint8)
         # Add a simple center region as "wound"
         center_h, center_w = h // 2, w // 2
         cv2.circle(mask, (center_w, center_h), min(h, w) // 8, 255, -1)
+        logger.warning(f"Using fallback mask with center circle at ({center_h}, {center_w})")
         return mask
     
     try:
+        logger.info(f"Running model prediction with input shape: {image_array.shape}")
         # Get prediction from model
         prediction = MODEL.predict(image_array, verbose=0)
+        logger.info(f"Model prediction shape: {prediction.shape}")
+        logger.info(f"Prediction min/max: {prediction.min():.4f}/{prediction.max():.4f}")
         
         # Convert to binary mask
         mask = (prediction[0, :, :, 0] > 0.5).astype(np.uint8) * 255
+        logger.info(f"Binary mask shape: {mask.shape}, non-zero pixels: {np.count_nonzero(mask)}")
         
         return mask
         
     except Exception as e:
-        logger.error(f"Model prediction failed: {e}")
+        logger.error(f"❌ Model prediction failed: {e}")
+        import traceback
+        logger.error(f"Prediction traceback: {traceback.format_exc()}")
         # Fallback to simple mask
         h, w = image_array.shape[1], image_array.shape[2]
         mask = np.zeros((h, w), dtype=np.uint8)
         center_h, center_w = h // 2, w // 2
         cv2.circle(mask, (center_w, center_h), min(h, w) // 8, 255, -1)
+        logger.warning(f"Using fallback mask due to prediction error")
         return mask
 
 def calculate_metrics(mask):
@@ -175,16 +199,33 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "model_loaded": MODEL_LOADED
+        "model_loaded": MODEL_LOADED,
+        "version": "1.0.0"
+    })
+
+@app.route('/debug', methods=['GET'])
+def debug_info():
+    """Debug information endpoint"""
+    model_path = os.getenv('SIMCLR_MODEL_PATH', '/app/models/simclr_unet_patch_wound.keras')
+    return jsonify({
+        "model_loaded": MODEL_LOADED,
+        "model_exists": MODEL is not None,
+        "model_path": model_path,
+        "model_path_exists": os.path.exists(model_path),
+        "model_path_files": os.listdir(os.path.dirname(model_path)) if os.path.exists(os.path.dirname(model_path)) else "Directory not found",
+        "model_input_shape": MODEL.input_shape if MODEL else None,
+        "model_output_shape": MODEL.output_shape if MODEL else None,
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.route('/ready', methods=['GET'])
 def ready_check():
     """Readiness check endpoint"""
     return jsonify({
-        "status": "ready",
-        "timestamp": datetime.now().isoformat(),
-        "model_loaded": MODEL_LOADED
+        "ready": MODEL_LOADED,
+        "model_loaded": MODEL_LOADED,
+        "message": "Service ready to process requests" if MODEL_LOADED else "Model not loaded",
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.route('/analyze', methods=['POST'])
