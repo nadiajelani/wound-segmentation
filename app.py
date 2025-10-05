@@ -231,12 +231,21 @@ def load_model():
 
 # Load model when Flask app is created (works with gunicorn)
 logger.info("🚀 Initializing Flask app...")
-logger.info("📦 Loading model during app initialization...")
-model_loaded = load_model()
-if model_loaded:
-    logger.info("✅ Model loaded successfully during app initialization")
-else:
-    logger.error("❌ Model failed to load during app initialization")
+logger.info("📦 Attempting to load model during app initialization...")
+
+# Try to load model, but don't crash if it fails
+try:
+    model_loaded = load_model()
+    if model_loaded:
+        logger.info("✅ Model loaded successfully during app initialization")
+    else:
+        logger.warning("⚠️ Model failed to load during app initialization - app will start anyway")
+except Exception as e:
+    logger.error(f"⚠️ Exception during model loading: {e}")
+    logger.warning("⚠️ App will start without model - healthcheck will still pass")
+    MODEL_LOADED = False
+
+logger.info("🎉 Flask app initialization complete - ready to accept connections")
 
 def preprocess_image(image_data, target_size=(128, 128)):
     """Preprocess image for model input"""
@@ -346,13 +355,16 @@ def calculate_metrics(mask):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - always returns 200 to pass Railway healthcheck"""
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "model_loaded": MODEL_LOADED,
-        "version": "1.0.0"
-    })
+        "model_status": "loaded" if MODEL_LOADED else "not_loaded",
+        "version": "1.0.0",
+        "python_version": sys.version.split()[0],
+        "tensorflow_version": tf.__version__
+    }), 200
 
 @app.route('/debug', methods=['GET'])
 def debug_info():
@@ -453,8 +465,27 @@ def analyze_wound():
 
 @app.route('/', methods=['GET'])
 def index():
-    """Serve the main HTML page"""
-    return send_from_directory('.', 'index_free.html')
+    """Root endpoint - returns API status"""
+    try:
+        # Try to serve HTML if it exists
+        if os.path.exists('index_free.html'):
+            return send_from_directory('.', 'index_free.html')
+    except:
+        pass
+    
+    # Fallback to JSON response
+    return jsonify({
+        "message": "Wound Segmentation API",
+        "status": "running",
+        "model_loaded": MODEL_LOADED,
+        "endpoints": {
+            "health": "/health",
+            "ready": "/ready",
+            "debug": "/debug",
+            "analyze": "/analyze (POST)"
+        },
+        "version": "1.0.0"
+    }), 200
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
