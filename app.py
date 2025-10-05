@@ -54,6 +54,40 @@ MODEL_LOADED = False
 def _log(msg): 
     logger.info(f"[MODEL] {msg}")
 
+def file_sha256(path):
+    """Calculate SHA256 hash of a file"""
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024*1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+def ensure_clean_local_model(model_path: str) -> None:
+    """Ensure model file is complete and valid before loading"""
+    # If a previous boot was killed mid-download, a tiny/invalid file may be present.
+    min_bytes = int(os.getenv("SIMCLR_MODEL_MIN_BYTES", "400000000"))  # ~400MB
+    expected_sha = os.getenv("SIMCLR_MODEL_SHA256", "").strip()
+
+    if os.path.exists(model_path):
+        size = os.path.getsize(model_path)
+        # delete if too small
+        if size < min_bytes:
+            try:
+                os.remove(model_path)
+                logger.info(f"[MODEL] Removed partial file ({size} bytes). Will re-download.")
+            except Exception as e:
+                logger.warning(f"[MODEL] Could not remove partial file: {e}")
+
+        # optional integrity check
+        elif expected_sha:
+            try:
+                actual = file_sha256(model_path)
+                if actual.lower() != expected_sha.lower():
+                    os.remove(model_path)
+                    logger.info("[MODEL] SHA256 mismatch. Removed and will re-download.")
+            except Exception as e:
+                logger.warning(f"[MODEL] SHA256 check failed: {e}")
+
 GITHUB_API = "https://api.github.com"
 
 def _http_get(url, headers, dest_path):
@@ -151,6 +185,9 @@ def load_model():
         repo_full  = os.getenv("SIMCLR_MODEL_REPO", "nadiajelani/wound-segmentation")
         asset_name = os.getenv("SIMCLR_MODEL_ASSET", "simclr_unet_patch_wound.keras")
 
+        # Ensure model file is complete and valid
+        ensure_clean_local_model(model_path)
+        
         if not os.path.exists(model_path):
             logger.info(f"[MODEL] Attempting download -> {model_path}")
             ok = download_model_with_fallbacks(model_url, model_path,
