@@ -39,44 +39,35 @@ MODEL = None
 MODEL_LOADED = False
 
 def load_model():
-    """Load the wound segmentation model (optimized for free tier)"""
+    """Load the wound segmentation model (TensorFlow 2.12 + tf.keras only)"""
     global MODEL, MODEL_LOADED
-    
     if MODEL_LOADED:
         return True
-    
+
     try:
         logger.info("Loading wound segmentation model...")
-        
-        # Try to load the model
         model_path = os.getenv('SIMCLR_MODEL_PATH', '/app/models/simclr_unet_patch_wound.keras')
-        
+
         if not os.path.exists(model_path):
-            logger.warning(f"Model not found at {model_path}, using fallback")
+            logger.warning(f"Model not found at {model_path}; falling back")
             return False
-        
-        # Load with Keras 3
-        import keras
-        os.environ["KERAS_BACKEND"] = "tensorflow"
-        os.environ["TF_USE_LEGACY_KERAS"] = "0"
-        
-        # Custom objects for the model
+
+        # IMPORTANT: use tf.keras, not standalone keras
         custom_objects = {
             'Custom>total_loss': lambda *args, **kwargs: 0.0,
             'total_loss': lambda *args, **kwargs: 0.0,
         }
-        
-        MODEL = keras.models.load_model(
+
+        MODEL = tf.keras.models.load_model(
             model_path,
             compile=False,
-            safe_mode=False,
             custom_objects=custom_objects
         )
-        
+
         MODEL_LOADED = True
-        logger.info("✅ Model loaded successfully!")
+        logger.info("✅ Model loaded successfully (tf.keras)")
         return True
-        
+
     except Exception as e:
         logger.error(f"❌ Model loading failed: {e}")
         MODEL = None
