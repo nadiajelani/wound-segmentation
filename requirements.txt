@@ -1,15 +1,21 @@
-# Railway Nixpacks-friendly requirements (Python 3.10 + TF 2.12)
+# --- Web ---
 flask==3.0.3
 flask-cors==4.0.1
 gunicorn==21.2.0
 
-# Core ML stack (TF 2.12 + Keras 2.12 for compatibility)
+# --- ML stack (TF 2.12 compatible!) ---
 tensorflow==2.12.0
 keras==2.12.0
-numpy==1.26.4
+numpy==1.23.5
+typing-extensions==4.5.0
+protobuf==4.25.3
+h5py==3.8.0
+absl-py==1.4.0
+opt-einsum==3.3.0
+google-pasta==0.2.0
+gast==0.4.0
+flatbuffers==23.5.26
+
+# --- Image / utils ---
 opencv-python-headless==4.10.0.84
 pillow==10.4.0
-
-# Essential for TF 2.12 compatibility
-protobuf==4.25.3
-werkzeug==3.0.1
