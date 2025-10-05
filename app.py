@@ -191,13 +191,20 @@ def load_model():
         # Ensure model file is complete and valid
         ensure_clean_local_model(model_path)
         
+        if os.path.exists(model_path):
+            logger.info(f"[MODEL] Model file exists at {model_path}, size: {os.path.getsize(model_path)} bytes")
+        
         if not os.path.exists(model_path):
             logger.info(f"[MODEL] Attempting download -> {model_path}")
+            logger.info(f"[MODEL] Download URL: {model_url}")
+            logger.info(f"[MODEL] Repo: {repo_full}, Tag: {tag}, Asset: {asset_name}")
             ok = download_model_with_fallbacks(model_url, model_path,
                                                repo_full=repo_full, tag=tag, asset_name=asset_name)
             if not ok:
                 logger.error("[MODEL] Download failed via all methods")
                 return False
+            else:
+                logger.info(f"[MODEL] Download successful, file size: {os.path.getsize(model_path)} bytes")
 
         import keras, tensorflow as tf
         os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -213,6 +220,8 @@ def load_model():
         return True
     except Exception as e:
         logger.error(f"❌ Model load error: {e}")
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         MODEL = None
         MODEL_LOADED = False
         return False
