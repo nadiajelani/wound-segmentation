@@ -94,6 +94,15 @@ def load_model():
         MODEL_LOADED = False
         return False
 
+# Load model when Flask app is created (works with gunicorn)
+logger.info("🚀 Initializing Flask app...")
+logger.info("📦 Loading model during app initialization...")
+model_loaded = load_model()
+if model_loaded:
+    logger.info("✅ Model loaded successfully during app initialization")
+else:
+    logger.error("❌ Model failed to load during app initialization")
+
 def preprocess_image(image_data, target_size=(128, 128)):
     """Preprocess image for model input"""
     try:
