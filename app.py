@@ -8,6 +8,7 @@ import time
 import logging
 import urllib.request
 import hashlib
+import ssl
 from pathlib import Path
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
@@ -51,54 +52,65 @@ MODEL_LOADED = False
 def _log(msg): 
     logger.info(f"[MODEL] {msg}")
 
-def _download(url: str, dst: str) -> bool:
-    try:
-        Path(os.path.dirname(dst)).mkdir(parents=True, exist_ok=True)
-        _log(f"Downloading model from {url} -> {dst}")
-        urllib.request.urlretrieve(url, dst)  # simple, works on Railway
-        size = os.path.getsize(dst)
-        _log(f"Download complete: {size:,} bytes")
-        return True
-    except Exception as e:
-        logger.error(f"[MODEL] Download failed: {e}")
-        return False
+def download_file(url, dest_path):
+    """Download file with proper headers and authentication"""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+
+    # GitHub expects a real UA; add Authorization if token is present (works for public & private)
+    headers = {
+        "User-Agent": "wound-segmentation/1.0 (+https://github.com/nadiajelani/wound-segmentation)",
+        "Accept": "application/octet-stream"
+    }
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    req = urllib.request.Request(url, headers=headers)
+
+    # Some platforms lack cert bundles; this keeps it robust
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, context=ctx) as r, open(dest_path, "wb") as f:
+        shutil.copyfileobj(r, f)
 
 def load_model():
-    """Load the wound segmentation model with download capability"""
+    """Load the wound segmentation model with improved download capability"""
     global MODEL, MODEL_LOADED
-    if MODEL_LOADED and MODEL is not None:
+    if MODEL_LOADED:
         return True
+    try:
+        logger.info("📦 Loading wound segmentation model...")
+        model_path = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
+        model_url  = os.getenv("SIMCLR_MODEL_URL", "").strip()
 
-    model_path = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
-    model_url  = os.getenv("SIMCLR_MODEL_URL", "").strip()
+        # If file missing, try to download
+        if not os.path.exists(model_path):
+            if model_url:
+                logger.info(f"[MODEL] Downloading from {model_url} -> {model_path}")
+                download_file(model_url, model_path)
+                logger.info("[MODEL] Download complete")
 
-    _log(f"Requested path: {model_path}")
-    _log(f"Download URL set: {bool(model_url)}")
-
-    if not os.path.exists(model_path):
-        if model_url:
-            if not _download(model_url, model_path):
-                _log("Model missing and download failed, using fallback")
-                MODEL_LOADED = False
-                return False
-        else:
-            _log("Model missing and no SIMCLR_MODEL_URL provided, using fallback")
-            MODEL_LOADED = False
+        if not os.path.exists(model_path):
+            logger.error("[MODEL] Model file still missing after download")
             return False
 
-    try:
+        # ---- Keras/TensorFlow load (TF 2.12 compatible) ----
+        import tensorflow as tf
+        import keras
+        os.environ["KERAS_BACKEND"] = "tensorflow"
+        os.environ["TF_USE_LEGACY_KERAS"] = "0"
+
         custom_objects = {
-            'Custom>total_loss': lambda *a, **k: 0.0,
-            'total_loss': lambda *a, **k: 0.0,
+            "Custom>total_loss": lambda *a, **k: 0.0,
+            "total_loss": lambda *a, **k: 0.0,
         }
-        _log("Loading model from disk...")
-        mdl = tf.keras.models.load_model(model_path, compile=False, custom_objects=custom_objects)
+        MODEL = keras.models.load_model(
+            model_path, compile=False, safe_mode=False, custom_objects=custom_objects
+        )
         MODEL_LOADED = True
-        MODEL = mdl
-        _log("✅ Model loaded successfully")
+        logger.info("✅ Model loaded successfully")
         return True
     except Exception as e:
-        logger.exception("[MODEL] Deserialization failed")
+        logger.error(f"❌ Model load error: {e}")
         MODEL = None
         MODEL_LOADED = False
         return False
