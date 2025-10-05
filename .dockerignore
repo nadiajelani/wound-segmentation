@@ -1,0 +1,22 @@
+# Keep image small and builds fast
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.DS_Store
+.env
+.venv
+venv
+
+# Keep local notebooks / caches out
+*.ipynb
+.ipynb_checkpoints/
+cache/
+dist/
+build/
+
+# Keep model files in
+!models/

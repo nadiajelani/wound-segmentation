@@ -1,16 +1,21 @@
-# Core
+# Force compatible Python version for TensorFlow 2.12
+python_version=="3.10.*"
+
+# Essential build tools (fixes "BackendUnavailable: setuptools.build_meta")
+setuptools>=68.0.0
+wheel>=0.41.0
+
+# Web framework
 Flask==3.0.2
 flask-cors==4.0.0
 gunicorn==21.2.0
 
-# Vision / array
+# Core ML stack (TF 2.12 + tf.keras only)
+tensorflow==2.12.0
 numpy==1.23.5
 opencv-python-headless==4.8.1.78
 Pillow==10.3.0
 
-# TensorFlow stack (mac/linux CPU ok)
-tensorflow==2.12.0
+# Essential for TF 2.12 compatibility
 protobuf==4.25.3
-
-# Optional but safe
 werkzeug==3.0.1
