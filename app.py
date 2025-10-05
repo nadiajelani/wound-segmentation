@@ -182,6 +182,10 @@ def load_model():
         return True
     try:
         logger.info("📦 Loading wound segmentation model...")
+        
+        # Set Keras backend before importing Keras
+        os.environ.setdefault("KERAS_BACKEND", "tensorflow")
+        
         model_path = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
         model_url  = os.getenv("SIMCLR_MODEL_URL", "")
         tag        = os.getenv("SIMCLR_MODEL_TAG", "v1.0.0")
@@ -206,17 +210,16 @@ def load_model():
             else:
                 logger.info(f"[MODEL] Download successful, file size: {os.path.getsize(model_path)} bytes")
 
-        import keras, tensorflow as tf
-        os.environ["KERAS_BACKEND"] = "tensorflow"
-        os.environ["TF_USE_LEGACY_KERAS"] = "0"
-        custom_objects = {
-            "Custom>total_loss": lambda *a, **k: 0.0,
-            "total_loss": lambda *a, **k: 0.0,
-        }
-        MODEL = keras.models.load_model(model_path, compile=False, safe_mode=False,
-                                        custom_objects=custom_objects)
+        # Import Keras 3 (not tf.keras)
+        import keras
+        logger.info(f"[MODEL] Using Keras version: {keras.__version__}")
+        
+        # Load model with Keras 3
+        MODEL = keras.models.load_model(model_path, compile=False)
         MODEL_LOADED = True
         logger.info("✅ Model loaded successfully")
+        logger.info(f"[MODEL] Input shape: {MODEL.input_shape}")
+        logger.info(f"[MODEL] Output shape: {MODEL.output_shape}")
         return True
     except Exception as e:
         logger.error(f"❌ Model load error: {e}")
