@@ -620,10 +620,15 @@ def analyze_wound():
 def index():
     """Root endpoint - serve wound analyzer interface"""
     try:
-        # Always try wound_analyzer.html first (the new version with all features)
-        return send_from_directory('.', 'wound_analyzer.html')
+        # Try index.html first, then wound_analyzer.html
+        if os.path.exists('index.html'):
+            return send_from_directory('.', 'index.html')
+        elif os.path.exists('wound_analyzer.html'):
+            return send_from_directory('.', 'wound_analyzer.html')
+        else:
+            raise FileNotFoundError("No HTML file found")
     except Exception as e:
-        logger.error(f"Could not serve wound_analyzer.html: {e}")
+        logger.error(f"Could not serve HTML: {e}")
         # Fallback to JSON response
         return jsonify({
             "message": "Wound Segmentation API",
@@ -641,7 +646,11 @@ def index():
 @app.route('/analyzer', methods=['GET'])
 def analyzer():
     """Direct route to wound analyzer"""
-    return send_from_directory('.', 'wound_analyzer.html')
+    if os.path.exists('wound_analyzer.html'):
+        return send_from_directory('.', 'wound_analyzer.html')
+    elif os.path.exists('index.html'):
+        return send_from_directory('.', 'index.html')
+    return jsonify({"error": "Analyzer not found"}), 404
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
