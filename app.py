@@ -275,47 +275,34 @@ def preprocess_image(image_data, target_size=(128, 128)):
         return None
 
 def predict_wound_mask(image_array):
-    """Predict wound mask using the loaded model"""
+    """
+    Returns:
+        pred_map: float32 array in [0,1] shaped (H, W) – the model's probability map
+        mask:     uint8 array in {0,255} shaped (H, W) – thresholded binary mask
+    """
     global MODEL, MODEL_LOADED
-    
-    logger.info(f"Predicting wound mask - Model loaded: {MODEL_LOADED}, Model exists: {MODEL is not None}")
-    logger.info(f"Input image shape: {image_array.shape}")
-    
+    h, w = image_array.shape[1], image_array.shape[2]
+
     if not MODEL_LOADED or MODEL is None:
         logger.error("❌ Model not loaded, using fallback prediction")
-        # Return a simple fallback mask
-        h, w = image_array.shape[1], image_array.shape[2]
-        mask = np.zeros((h, w), dtype=np.uint8)
-        # Add a simple center region as "wound"
-        center_h, center_w = h // 2, w // 2
-        cv2.circle(mask, (center_w, center_h), min(h, w) // 8, 255, -1)
-        logger.warning(f"Using fallback mask with center circle at ({center_h}, {center_w})")
-        return mask
-    
+        pred_map = np.zeros((h, w), dtype=np.float32)
+        cv2.circle(pred_map, (w // 2, h // 2), min(h, w) // 8, 1.0, -1)
+        mask = (pred_map > 0.5).astype(np.uint8) * 255
+        return pred_map, mask
+
     try:
-        logger.info(f"Running model prediction with input shape: {image_array.shape}")
-        # Get prediction from model
-        prediction = MODEL.predict(image_array, verbose=0)
-        logger.info(f"Model prediction shape: {prediction.shape}")
-        logger.info(f"Prediction min/max: {prediction.min():.4f}/{prediction.max():.4f}")
-        
-        # Convert to binary mask
-        mask = (prediction[0, :, :, 0] > 0.5).astype(np.uint8) * 255
-        logger.info(f"Binary mask shape: {mask.shape}, non-zero pixels: {np.count_nonzero(mask)}")
-        
-        return mask
-        
+        # Model outputs (1, H, W, 1) with values in [0,1]
+        prediction = MODEL.predict(image_array, verbose=0)[0, :, :, 0].astype(np.float32)
+        pred_map = np.clip(prediction, 0.0, 1.0)
+        mask = (pred_map > 0.5).astype(np.uint8) * 255
+        return pred_map, mask
+
     except Exception as e:
-        logger.error(f"❌ Model prediction failed: {e}")
-        import traceback
-        logger.error(f"Prediction traceback: {traceback.format_exc()}")
-        # Fallback to simple mask
-        h, w = image_array.shape[1], image_array.shape[2]
-        mask = np.zeros((h, w), dtype=np.uint8)
-        center_h, center_w = h // 2, w // 2
-        cv2.circle(mask, (center_w, center_h), min(h, w) // 8, 255, -1)
-        logger.warning(f"Using fallback mask due to prediction error")
-        return mask
+        logger.error(f"Model prediction failed: {e}")
+        pred_map = np.zeros((h, w), dtype=np.float32)
+        cv2.circle(pred_map, (w // 2, h // 2), min(h, w) // 8, 1.0, -1)
+        mask = (pred_map > 0.5).astype(np.uint8) * 255
+        return pred_map, mask
 
 def calculate_metrics(mask):
     """Calculate wound metrics from mask"""
@@ -352,6 +339,29 @@ def calculate_metrics(mask):
             "perimeter": 0.0,
             "severity": "Unknown"
         }
+
+def to_base64_png(img: np.ndarray) -> str:
+    """Encode a HxW or HxWx3 uint8 image to data URL PNG base64."""
+    if img.ndim == 2:
+        pil_img = Image.fromarray(img)
+    else:
+        pil_img = Image.fromarray(img[:, :, ::-1]) if img.shape[2] == 3 and img.dtype == np.uint8 else Image.fromarray(img)
+    buff = io.BytesIO()
+    pil_img.save(buff, format='PNG')
+    return "data:image/png;base64," + base64.b64encode(buff.getvalue()).decode()
+
+def make_heatmap(pred_map: np.ndarray) -> np.ndarray:
+    """pred_map in [0,1] -> uint8 BGR heatmap via OpenCV COLORMAP_JET."""
+    hm = (pred_map * 255.0).astype(np.uint8)
+    hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)  # BGR
+    return hm_color
+
+def make_overlay(rgb_image_0_1: np.ndarray, heatmap_bgr: np.ndarray, alpha: float = 0.45) -> np.ndarray:
+    """Blend heatmap over original RGB (0..1). Returns uint8 BGR for easy PNG."""
+    # rgb_image_0_1: (H,W,3) float32 in [0,1] from preprocess
+    base_bgr = (rgb_image_0_1 * 255.0).astype(np.uint8)[:, :, ::-1]  # to BGR
+    overlay = cv2.addWeighted(heatmap_bgr, alpha, base_bgr, 1.0 - alpha, 0.0)
+    return overlay
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -432,27 +442,31 @@ def analyze_wound():
             return jsonify({"error": "No image data provided"}), 400
         
         # Preprocess image
-        img_array = preprocess_image(image_data)
+        img_array = preprocess_image(image_data)  # shape (1, H, W, 3), float32 in [0,1]
         if img_array is None:
             return jsonify({"error": "Image preprocessing failed"}), 400
         
-        # Predict wound mask
-        mask = predict_wound_mask(img_array)
+        # Predict map + mask
+        pred_map, mask = predict_wound_mask(img_array)
         
-        # Calculate metrics
+        # Metrics from binary mask
         metrics = calculate_metrics(mask)
         
-        # Convert mask to base64 for response
-        mask_pil = Image.fromarray(mask)
-        mask_buffer = io.BytesIO()
-        mask_pil.save(mask_buffer, format='PNG')
-        mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode()
+        # Build visuals
+        heatmap_bgr = make_heatmap(pred_map)                          # HxWx3 (BGR)
+        overlay_bgr = make_overlay(img_array[0], heatmap_bgr, 0.45)   # HxWx3 (BGR)
         
-        # Create response
+        # Encode images
+        mask_b64     = to_base64_png(mask)          # grayscale
+        heatmap_b64  = to_base64_png(heatmap_bgr)   # color heatmap
+        overlay_b64  = to_base64_png(overlay_bgr)   # blended on original
+        
         result = {
             "success": True,
             "metrics": metrics,
-            "mask_image": f"data:image/png;base64,{mask_base64}",
+            "mask_image": mask_b64,
+            "heatmap_image": heatmap_b64,
+            "overlay_image": overlay_b64,
             "timestamp": datetime.now().isoformat()
         }
         

@@ -438,12 +438,10 @@
                         </div>
                     </div>
 
-                    <!-- Heatmap Overlay -->
+                    <!-- Confidence Heatmap -->
                     <div class="image-card">
                         <h3>🌡️ Confidence Heatmap</h3>
-                        <div class="heatmap-container">
-                            <canvas id="heatmapCanvas" style="width: 100%; border-radius: 10px;"></canvas>
-                        </div>
+                        <img id="heatmapImage" alt="Confidence heatmap">
                         <div class="legend">
                             <div class="legend-title">Confidence Level:</div>
                             <div class="legend-gradient"></div>
@@ -451,6 +449,18 @@
                                 <span>Low (0%)</span>
                                 <span>Medium (50%)</span>
                                 <span>High (100%)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Overlay Image -->
+                    <div class="image-card">
+                        <h3>🎨 Heatmap Overlay</h3>
+                        <img id="overlayImage" alt="Heatmap overlay on original">
+                        <div class="legend">
+                            <div class="legend-title">Blended Visualization:</div>
+                            <div style="margin-top: 8px; font-size: 0.9em; color: #666;">
+                                Heatmap overlaid on original image for context
                             </div>
                         </div>
                     </div>
@@ -490,6 +500,9 @@
                     </button>
                     <button class="download-btn" onclick="downloadImage('heatmap')">
                         Download Heatmap
+                    </button>
+                    <button class="download-btn" onclick="downloadImage('overlay')">
+                        Download Overlay
                     </button>
                     <button class="download-btn" onclick="downloadReport()">
                         Download Report (JSON)
@@ -657,11 +670,10 @@
             };
             reader.readAsDataURL(currentImageFile);
 
-            // Display mask
+            // Display all three images from backend
             document.getElementById('maskImage').src = result.mask_image;
-
-            // Generate and display heatmap
-            generateHeatmap(result.mask_image);
+            document.getElementById('heatmapImage').src = result.heatmap_image;
+            document.getElementById('overlayImage').src = result.overlay_image;
 
             // Display metrics
             const metrics = result.metrics;
@@ -679,99 +691,6 @@
             document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
         }
 
-        function generateHeatmap(maskImageData) {
-            const canvas = document.getElementById('heatmapCanvas');
-            const ctx = canvas.getContext('2d');
-
-            const img = new Image();
-            img.onload = function() {
-                // Set canvas size
-                canvas.width = img.width;
-                canvas.height = img.height;
-
-                // Draw original image
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const originalImg = new Image();
-                    originalImg.onload = function() {
-                        ctx.drawImage(originalImg, 0, 0, canvas.width, canvas.height);
-
-                        // Create heatmap overlay
-                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                        const data = imageData.data;
-
-                        // Get mask data
-                        const maskCanvas = document.createElement('canvas');
-                        maskCanvas.width = img.width;
-                        maskCanvas.height = img.height;
-                        const maskCtx = maskCanvas.getContext('2d');
-                        maskCtx.drawImage(img, 0, 0);
-                        const maskData = maskCtx.getImageData(0, 0, img.width, img.height).data;
-
-                        // Apply heatmap coloring
-                        for (let i = 0; i < data.length; i += 4) {
-                            const intensity = maskData[i] / 255; // Normalized intensity
-
-                            if (intensity > 0.1) {
-                                // Apply color gradient based on intensity
-                                const color = getHeatmapColor(intensity);
-                                
-                                // Blend with original
-                                const alpha = 0.5; // Transparency
-                                data[i] = data[i] * (1 - alpha) + color.r * alpha;
-                                data[i + 1] = data[i + 1] * (1 - alpha) + color.g * alpha;
-                                data[i + 2] = data[i + 2] * (1 - alpha) + color.b * alpha;
-                            }
-                        }
-
-                        ctx.putImageData(imageData, 0, 0);
-                    };
-                    originalImg.src = e.target.result;
-                };
-                reader.readAsDataURL(currentImageFile);
-            };
-            img.src = maskImageData;
-        }
-
-        function getHeatmapColor(value) {
-            // Create a color gradient from blue (low) to red (high)
-            // Blue -> Cyan -> Green -> Yellow -> Red
-            
-            if (value < 0.25) {
-                // Blue to Cyan
-                const t = value / 0.25;
-                return {
-                    r: 0,
-                    g: Math.round(255 * t),
-                    b: 255
-                };
-            } else if (value < 0.5) {
-                // Cyan to Green
-                const t = (value - 0.25) / 0.25;
-                return {
-                    r: 0,
-                    g: 255,
-                    b: Math.round(255 * (1 - t))
-                };
-            } else if (value < 0.75) {
-                // Green to Yellow
-                const t = (value - 0.5) / 0.25;
-                return {
-                    r: Math.round(255 * t),
-                    g: 255,
-                    b: 0
-                };
-            } else {
-                // Yellow to Red
-                const t = (value - 0.75) / 0.25;
-                return {
-                    r: 255,
-                    g: Math.round(255 * (1 - t)),
-                    b: 0
-                };
-            }
-        }
-
         function downloadImage(type) {
             const link = document.createElement('a');
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -780,9 +699,11 @@
                 link.href = currentResult.mask_image;
                 link.download = `wound_mask_${timestamp}.png`;
             } else if (type === 'heatmap') {
-                const canvas = document.getElementById('heatmapCanvas');
-                link.href = canvas.toDataURL('image/png');
+                link.href = currentResult.heatmap_image;
                 link.download = `wound_heatmap_${timestamp}.png`;
+            } else if (type === 'overlay') {
+                link.href = currentResult.overlay_image;
+                link.download = `wound_overlay_${timestamp}.png`;
             }
 
             link.click();
