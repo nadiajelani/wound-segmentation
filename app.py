@@ -316,6 +316,11 @@ def calculate_metrics(mask):
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         perimeter = cv2.arcLength(contours[0], True) if len(contours) > 0 else 0
         
+        # Calculate circularity (4π × area / perimeter²)
+        circularity = 0.0
+        if perimeter > 0:
+            circularity = (4 * np.pi * area_pixels) / (perimeter ** 2)
+        
         # Determine severity
         if area_percentage < 1:
             severity = "Mild"
@@ -328,6 +333,7 @@ def calculate_metrics(mask):
             "area_pixels": int(area_pixels),
             "area_percentage": round(area_percentage, 2),
             "perimeter": round(float(perimeter), 2),
+            "circularity": round(float(circularity), 3),
             "severity": severity
         }
         
@@ -337,8 +343,132 @@ def calculate_metrics(mask):
             "area_pixels": 0,
             "area_percentage": 0.0,
             "perimeter": 0.0,
+            "circularity": 0.0,
             "severity": "Unknown"
         }
+
+def classify_healing_stage(metrics, pred_map):
+    """Classify wound healing stage based on metrics and prediction confidence"""
+    try:
+        area_pct = metrics.get("area_percentage", 0)
+        circularity = metrics.get("circularity", 0)
+        
+        # Calculate average confidence in wound region
+        mask = (pred_map > 0.5).astype(np.uint8)
+        if np.sum(mask) > 0:
+            avg_confidence = np.mean(pred_map[mask > 0])
+        else:
+            avg_confidence = 0
+        
+        # Classify healing stage based on characteristics
+        if area_pct < 0.5 and circularity > 0.7:
+            stage = "Final Remodeling"
+            description = "Wound shows minimal tissue involvement with well-defined borders. Near complete healing."
+            recommendations = [
+                "Continue monitoring for complete epithelialization",
+                "Protect new tissue from trauma",
+                "Consider scar management if needed"
+            ]
+        elif area_pct < 2 and avg_confidence > 0.6:
+            stage = "Proliferative/Maturation"
+            description = "Active tissue regeneration with granulation tissue formation and epithelialization in progress."
+            recommendations = [
+                "Maintain moist wound environment",
+                "Monitor for signs of infection",
+                "Consider nutritional support",
+                "Continue current treatment protocol"
+            ]
+        elif area_pct < 5:
+            stage = "Early Proliferative"
+            description = "Wound bed preparation phase with new tissue formation beginning."
+            recommendations = [
+                "Ensure adequate debridement if needed",
+                "Optimize wound bed moisture balance",
+                "Address any underlying factors affecting healing",
+                "Regular dressing changes per protocol"
+            ]
+        else:
+            stage = "Inflammatory/Early Healing"
+            description = "Initial healing phase with inflammatory response. Wound requires close monitoring."
+            recommendations = [
+                "Assess for infection signs",
+                "Ensure proper wound cleansing",
+                "Evaluate underlying health conditions",
+                "Consider advanced wound care consultation",
+                "Regular clinical assessment required"
+            ]
+        
+        return {
+            "stage": stage,
+            "description": description,
+            "confidence": round(float(avg_confidence), 3),
+            "recommendations": recommendations
+        }
+        
+    except Exception as e:
+        logger.error(f"Healing stage classification failed: {e}")
+        return {
+            "stage": "Assessment Required",
+            "description": "Unable to classify healing stage automatically. Clinical assessment recommended.",
+            "confidence": 0.0,
+            "recommendations": ["Consult healthcare provider for proper assessment"]
+        }
+
+def generate_doctor_report(metrics, healing_stage, timestamp):
+    """Generate comprehensive doctor's report"""
+    try:
+        report = {
+            "report_id": f"WA-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+            "generated_at": timestamp,
+            "patient_info": {
+                "note": "Patient details to be added by healthcare provider"
+            },
+            "clinical_findings": {
+                "wound_area": f"{metrics['area_pixels']} pixels ({metrics['area_percentage']}% of image)",
+                "wound_perimeter": f"{metrics['perimeter']} pixels",
+                "wound_shape": f"Circularity: {metrics['circularity']} (1.0 = perfect circle)",
+                "severity_classification": metrics['severity']
+            },
+            "healing_assessment": {
+                "stage": healing_stage['stage'],
+                "stage_description": healing_stage['description'],
+                "ai_confidence": f"{healing_stage['confidence'] * 100:.1f}%"
+            },
+            "clinical_recommendations": healing_stage['recommendations'],
+            "technical_notes": {
+                "analysis_method": "AI-powered segmentation using SimCLR-pretrained U-Net",
+                "image_processing": "Automated segmentation with confidence heatmap analysis",
+                "note": "This AI analysis is a decision support tool and should be used in conjunction with clinical judgment"
+            },
+            "follow_up": {
+                "recommended_reassessment": _get_followup_interval(metrics['severity']),
+                "monitoring_parameters": [
+                    "Wound size and area changes",
+                    "Signs of infection (redness, warmth, discharge)",
+                    "Healing progression",
+                    "Patient symptoms and comfort"
+                ]
+            },
+            "disclaimer": "This report is generated by an AI system for clinical decision support. Final diagnosis and treatment decisions should be made by qualified healthcare professionals based on complete clinical assessment."
+        }
+        
+        return report
+        
+    except Exception as e:
+        logger.error(f"Doctor report generation failed: {e}")
+        return {
+            "error": "Report generation failed",
+            "message": str(e)
+        }
+
+def _get_followup_interval(severity):
+    """Get recommended follow-up interval based on severity"""
+    intervals = {
+        "Mild": "Re-assess in 5-7 days or as clinically indicated",
+        "Moderate": "Re-assess in 3-5 days or sooner if symptoms worsen",
+        "Severe": "Re-assess in 24-48 hours or immediately if symptoms worsen"
+    }
+    return intervals.get(severity, "Re-assess as clinically indicated")
 
 def to_base64_png(img: np.ndarray) -> str:
     """Encode a HxW or HxWx3 uint8 image to data URL PNG base64."""
@@ -452,6 +582,13 @@ def analyze_wound():
         # Metrics from binary mask
         metrics = calculate_metrics(mask)
         
+        # Classify healing stage
+        healing_stage = classify_healing_stage(metrics, pred_map)
+        
+        # Generate doctor's report
+        timestamp = datetime.now().isoformat()
+        doctor_report = generate_doctor_report(metrics, healing_stage, timestamp)
+        
         # Build visuals
         heatmap_bgr = make_heatmap(pred_map)                          # HxWx3 (BGR)
         overlay_bgr = make_overlay(img_array[0], heatmap_bgr, 0.45)   # HxWx3 (BGR)
@@ -464,13 +601,15 @@ def analyze_wound():
         result = {
             "success": True,
             "metrics": metrics,
+            "healing_stage": healing_stage,
+            "doctor_report": doctor_report,
             "mask_image": mask_b64,
             "heatmap_image": heatmap_b64,
             "overlay_image": overlay_b64,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": timestamp
         }
         
-        logger.info(f"Analysis completed: {metrics}")
+        logger.info(f"Analysis completed: {metrics}, Stage: {healing_stage['stage']}")
         return jsonify(result)
         
     except Exception as e:
