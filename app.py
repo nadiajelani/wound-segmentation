@@ -479,30 +479,30 @@ def analyze_wound():
 
 @app.route('/', methods=['GET'])
 def index():
-    """Root endpoint - returns API status"""
+    """Root endpoint - serve wound analyzer interface"""
     try:
-        # Try to serve the wound analyzer HTML
-        if os.path.exists('wound_analyzer.html'):
-            return send_from_directory('.', 'wound_analyzer.html')
-        # Fallback to index_free.html
-        elif os.path.exists('index_free.html'):
-            return send_from_directory('.', 'index_free.html')
-    except:
-        pass
-    
-    # Fallback to JSON response
-    return jsonify({
-        "message": "Wound Segmentation API",
-        "status": "running",
-        "model_loaded": MODEL_LOADED,
-        "endpoints": {
-            "health": "/health",
-            "ready": "/ready",
-            "debug": "/debug",
-            "analyze": "/analyze (POST)"
-        },
-        "version": "1.0.0"
-    }), 200
+        # Always try wound_analyzer.html first (the new version with all features)
+        return send_from_directory('.', 'wound_analyzer.html')
+    except Exception as e:
+        logger.error(f"Could not serve wound_analyzer.html: {e}")
+        # Fallback to JSON response
+        return jsonify({
+            "message": "Wound Segmentation API",
+            "status": "running",
+            "model_loaded": MODEL_LOADED,
+            "endpoints": {
+                "health": "/health",
+                "ready": "/ready",
+                "debug": "/debug",
+                "analyze": "/analyze (POST)"
+            },
+            "version": "1.0.0"
+        }), 200
+
+@app.route('/analyzer', methods=['GET'])
+def analyzer():
+    """Direct route to wound analyzer"""
+    return send_from_directory('.', 'wound_analyzer.html')
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
