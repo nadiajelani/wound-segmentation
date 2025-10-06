@@ -539,8 +539,8 @@
     </div>
 
     <script>
-        // Configuration
-        const API_URL = 'https://your-app.up.railway.app'; // Replace with your Railway URL
+        // Configuration - automatically use the same domain as the website
+        const API_URL = window.location.origin; // Uses the current domain (works locally and in production)
         
         let currentImageFile = null;
         let currentResult = null;

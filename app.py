@@ -481,8 +481,11 @@ def analyze_wound():
 def index():
     """Root endpoint - returns API status"""
     try:
-        # Try to serve HTML if it exists
-        if os.path.exists('index_free.html'):
+        # Try to serve the wound analyzer HTML
+        if os.path.exists('wound_analyzer.html'):
+            return send_from_directory('.', 'wound_analyzer.html')
+        # Fallback to index_free.html
+        elif os.path.exists('index_free.html'):
             return send_from_directory('.', 'index_free.html')
     except:
         pass
