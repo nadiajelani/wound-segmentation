@@ -641,27 +641,26 @@ def analyze_wound():
 def index():
     """Root endpoint - serve wound analyzer interface"""
     try:
-        # Try index.html first, then wound_analyzer.html
-        if os.path.exists('index.html'):
-            return send_from_directory('.', 'index.html')
-        elif os.path.exists('wound_analyzer.html'):
+        # Serve the new medical-grade wound analyzer
+        if os.path.exists('wound_analyzer.html'):
             return send_from_directory('.', 'wound_analyzer.html')
         else:
-            raise FileNotFoundError("No HTML file found")
+            raise FileNotFoundError("wound_analyzer.html not found")
     except Exception as e:
         logger.error(f"Could not serve HTML: {e}")
         # Fallback to JSON response
         return jsonify({
-            "message": "Wound Segmentation API",
+            "message": "Clinical Wound Assessment System",
             "status": "running",
             "model_loaded": MODEL_LOADED,
             "endpoints": {
                 "health": "/health",
                 "ready": "/ready",
                 "debug": "/debug",
+                "debug-ui": "/debug-ui",
                 "analyze": "/analyze (POST)"
             },
-            "version": "1.0.0"
+            "version": "2.0.0-HEATMAP-ENABLED"
         }), 200
 
 @app.route('/analyzer', methods=['GET'])
