@@ -247,6 +247,59 @@ except Exception as e:
 
 logger.info("🎉 Flask app initialization complete - ready to accept connections")
 
+def detect_skin_tone(image_rgb):
+    """
+    Detect and classify skin tone using Fitzpatrick scale
+    Args:
+        image_rgb: RGB image array (normalized 0-1)
+    Returns:
+        dict with skin_type, skin_class, luminance, rgb_values
+    """
+    try:
+        # Calculate average RGB (avoiding wound area by using median)
+        avg_color = np.median(image_rgb, axis=(0, 1))
+        
+        # Calculate luminance using standard formula
+        luminance = 0.299 * avg_color[0] + 0.587 * avg_color[1] + 0.114 * avg_color[2]
+        luminance = float(luminance * 255)  # Scale to 0-255
+        
+        # Classify into Fitzpatrick scale (Types I-VI)
+        if luminance > 220:
+            skin_class = 1
+            skin_type = "Type I (Very Fair)"
+        elif luminance > 190:
+            skin_class = 2
+            skin_type = "Type II (Fair)"
+        elif luminance > 160:
+            skin_class = 3
+            skin_type = "Type III (Medium)"
+        elif luminance > 130:
+            skin_class = 4
+            skin_type = "Type IV (Olive)"
+        elif luminance > 90:
+            skin_class = 5
+            skin_type = "Type V (Brown)"
+        else:
+            skin_class = 6
+            skin_type = "Type VI (Dark)"
+        
+        return {
+            "skin_type": skin_type,
+            "skin_class": skin_class,
+            "luminance": round(luminance, 2),
+            "rgb_average": [round(float(avg_color[0] * 255), 1), 
+                           round(float(avg_color[1] * 255), 1), 
+                           round(float(avg_color[2] * 255), 1)]
+        }
+    except Exception as e:
+        logger.error(f"Skin tone detection failed: {e}")
+        return {
+            "skin_type": "Unknown",
+            "skin_class": 0,
+            "luminance": 0,
+            "rgb_average": [0, 0, 0]
+        }
+
 def preprocess_image(image_data, target_size=(128, 128)):
     """Preprocess image for model input"""
     try:
@@ -591,6 +644,10 @@ def analyze_wound():
         # Metrics from binary mask
         metrics = calculate_metrics(mask)
         
+        # Detect skin tone
+        skin_analysis = detect_skin_tone(img_array[0])
+        logger.info(f"Skin tone detected: {skin_analysis['skin_type']}")
+        
         # Classify healing stage
         healing_stage = classify_healing_stage(metrics, pred_map)
         
@@ -621,6 +678,7 @@ def analyze_wound():
         result = {
             "success": True,
             "metrics": metrics,
+            "skin_analysis": skin_analysis,  # NEW: Skin tone information
             "healing_stage": healing_stage,
             "doctor_report": doctor_report,
             "mask_image": mask_b64,
@@ -629,7 +687,7 @@ def analyze_wound():
             "timestamp": timestamp
         }
         
-        logger.info(f"Analysis completed: {metrics}, Stage: {healing_stage['stage']}")
+        logger.info(f"Analysis completed: {metrics}, Stage: {healing_stage['stage']}, Skin: {skin_analysis['skin_type']}")
         logger.info(f"Returning JSON with {len(result)} keys: {list(result.keys())}")
         return jsonify(result)
         
@@ -683,6 +741,52 @@ def debug_ui():
 def static_files(filename):
     """Serve static files"""
     return send_from_directory('static', filename)
+
+# In-memory storage for comments (in production, use database)
+comments_storage = []
+
+@app.route('/api/comments', methods=['GET', 'POST', 'OPTIONS'])
+def handle_comments():
+    """Handle comments - GET to retrieve, POST to add"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    if request.method == 'GET':
+        # Return all comments
+        return jsonify({
+            "success": True,
+            "comments": comments_storage,
+            "total": len(comments_storage)
+        }), 200
+    
+    elif request.method == 'POST':
+        try:
+            data = request.get_json()
+            comment = {
+                "id": len(comments_storage) + 1,
+                "name": data.get('name', 'Anonymous'),
+                "email": data.get('email', ''),
+                "comment": data.get('comment', ''),
+                "rating": data.get('rating', 0),
+                "timestamp": datetime.now().isoformat(),
+                "report_id": data.get('report_id', '')
+            }
+            
+            comments_storage.append(comment)
+            logger.info(f"New comment added: {comment['id']} from {comment['name']}")
+            
+            return jsonify({
+                "success": True,
+                "message": "Comment added successfully",
+                "comment": comment
+            }), 201
+            
+        except Exception as e:
+            logger.error(f"Error adding comment: {e}")
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 400
 
 if __name__ == '__main__':
     # Load model on startup
