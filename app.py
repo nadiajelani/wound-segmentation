@@ -509,7 +509,8 @@ def health_check():
         "timestamp": datetime.now().isoformat(),
         "model_loaded": MODEL_LOADED,
         "model_status": "loaded" if MODEL_LOADED else "not_loaded",
-        "version": "1.0.0",
+        "version": "2.0.0-HEATMAP-ENABLED",
+        "has_heatmap_code": True,
         "python_version": sys.version.split()[0],
         "tensorflow_version": tf.__version__
     }), 200
