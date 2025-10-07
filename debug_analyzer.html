@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Wound Analyzer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .images {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .image-box {
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+        .image-box img {
+            max-width: 100%;
+            height: auto;
+        }
+        .debug-info {
+            background: #f5f5f5;
+            padding: 10px;
+            margin-top: 20px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Debug Wound Analyzer</h1>
+    <p>This page shows EXACTLY what the API returns to help diagnose issues.</p>
+
+    <div class="container">
+        <h2>Upload Image</h2>
+        <input type="file" id="imageInput" accept="image/*">
+        <button onclick="analyzeImage()">Analyze & Debug</button>
+    </div>
+
+    <div id="status"></div>
+
+    <div class="container" id="debugInfo" style="display:none;">
+        <h2>API Response Debug Info</h2>
+        <div class="debug-info" id="debugText"></div>
+    </div>
+
+    <div class="container" id="imagesContainer" style="display:none;">
+        <h2>Images Returned by API</h2>
+        <div class="images">
+            <div class="image-box">
+                <h3>Mask Image</h3>
+                <img id="maskImg" alt="Mask">
+                <p id="maskStatus"></p>
+            </div>
+            <div class="image-box">
+                <h3>Heatmap Image</h3>
+                <img id="heatmapImg" alt="Heatmap">
+                <p id="heatmapStatus"></p>
+            </div>
+            <div class="image-box">
+                <h3>Overlay Image</h3>
+                <img id="overlayImg" alt="Overlay">
+                <p id="overlayStatus"></p>
+            </div>
+            <div class="image-box">
+                <h3>Original Image</h3>
+                <img id="originalImg" alt="Original">
+                <p>For reference</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" id="reportContainer" style="display:none;">
+        <h2>Doctor Report</h2>
+        <div class="debug-info" id="reportText"></div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin;
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        async function analyzeImage() {
+            const fileInput = document.getElementById('imageInput');
+            if (!fileInput.files.length) {
+                showStatus('Please select an image first!', 'error');
+                return;
+            }
+
+            showStatus('Analyzing image...', 'info');
+
+            const formData = new FormData();
+            formData.append('image', fileInput.files[0]);
+
+            try {
+                const response = await fetch(`${API_URL}/analyze`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                showStatus(`Response status: ${response.status}`, response.ok ? 'success' : 'error');
+
+                const data = await response.json();
+
+                // Show debug info
+                document.getElementById('debugInfo').style.display = 'block';
+                
+                let debugText = `API Response Structure:\n`;
+                debugText += `======================\n\n`;
+                
+                for (const [key, value] of Object.entries(data)) {
+                    if (typeof value === 'string' && key.includes('image')) {
+                        debugText += `${key}:\n`;
+                        debugText += `  - Type: string (base64 image)\n`;
+                        debugText += `  - Length: ${value.length} characters\n`;
+                        debugText += `  - Starts with: ${value.substring(0, 50)}...\n`;
+                        debugText += `  - Is valid base64 PNG: ${value.startsWith('data:image/png;base64,')}\n\n`;
+                    } else if (typeof value === 'object') {
+                        debugText += `${key}:\n`;
+                        debugText += JSON.stringify(value, null, 2) + '\n\n';
+                    } else {
+                        debugText += `${key}: ${value}\n\n`;
+                    }
+                }
+
+                document.getElementById('debugText').textContent = debugText;
+
+                // Show images
+                if (data.mask_image || data.heatmap_image || data.overlay_image) {
+                    document.getElementById('imagesContainer').style.display = 'block';
+
+                    // Mask
+                    if (data.mask_image) {
+                        document.getElementById('maskImg').src = data.mask_image;
+                        document.getElementById('maskStatus').innerHTML = `✅ PRESENT (${data.mask_image.length} chars)`;
+                        document.getElementById('maskStatus').style.color = 'green';
+                    } else {
+                        document.getElementById('maskStatus').innerHTML = '❌ MISSING';
+                        document.getElementById('maskStatus').style.color = 'red';
+                    }
+
+                    // Heatmap
+                    if (data.heatmap_image) {
+                        document.getElementById('heatmapImg').src = data.heatmap_image;
+                        document.getElementById('heatmapStatus').innerHTML = `✅ PRESENT (${data.heatmap_image.length} chars)`;
+                        document.getElementById('heatmapStatus').style.color = 'green';
+                    } else {
+                        document.getElementById('heatmapStatus').innerHTML = '❌ MISSING';
+                        document.getElementById('heatmapStatus').style.color = 'red';
+                    }
+
+                    // Overlay
+                    if (data.overlay_image) {
+                        document.getElementById('overlayImg').src = data.overlay_image;
+                        document.getElementById('overlayStatus').innerHTML = `✅ PRESENT (${data.overlay_image.length} chars)`;
+                        document.getElementById('overlayStatus').style.color = 'green';
+                    } else {
+                        document.getElementById('overlayStatus').innerHTML = '❌ MISSING';
+                        document.getElementById('overlayStatus').style.color = 'red';
+                    }
+
+                    // Original (for reference)
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        document.getElementById('originalImg').src = e.target.result;
+                    };
+                    reader.readAsDataURL(fileInput.files[0]);
+                }
+
+                // Show report
+                if (data.doctor_report) {
+                    document.getElementById('reportContainer').style.display = 'block';
+                    document.getElementById('reportText').textContent = JSON.stringify(data.doctor_report, null, 2);
+                }
+
+                // Final summary
+                const summary = [];
+                if (data.mask_image) summary.push('✅ Mask');
+                else summary.push('❌ Mask');
+                
+                if (data.heatmap_image) summary.push('✅ Heatmap');
+                else summary.push('❌ Heatmap');
+                
+                if (data.overlay_image) summary.push('✅ Overlay');
+                else summary.push('❌ Overlay');
+                
+                if (data.doctor_report) summary.push('✅ Report');
+                else summary.push('❌ Report');
+
+                showStatus(`Analysis complete! ${summary.join(' | ')}`, 'success');
+
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                console.error('Analysis error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

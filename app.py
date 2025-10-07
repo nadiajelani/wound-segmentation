@@ -283,6 +283,9 @@ def predict_wound_mask(image_array):
     global MODEL, MODEL_LOADED
     h, w = image_array.shape[1], image_array.shape[2]
 
+    logger.info(f"Predicting wound mask - Model loaded: {MODEL_LOADED}, Model exists: {MODEL is not None}")
+    logger.info(f"Input image shape: {image_array.shape}")
+
     if not MODEL_LOADED or MODEL is None:
         logger.error("❌ Model not loaded, using fallback prediction")
         pred_map = np.zeros((h, w), dtype=np.float32)
@@ -292,9 +295,14 @@ def predict_wound_mask(image_array):
 
     try:
         # Model outputs (1, H, W, 1) with values in [0,1]
+        logger.info(f"Running model prediction with input shape: {image_array.shape}")
         prediction = MODEL.predict(image_array, verbose=0)[0, :, :, 0].astype(np.float32)
+        logger.info(f"Model prediction shape: {prediction.shape}")
+        logger.info(f"Prediction min/max: {prediction.min():.4f}/{prediction.max():.4f}")
+        
         pred_map = np.clip(prediction, 0.0, 1.0)
         mask = (pred_map > 0.5).astype(np.uint8) * 255
+        logger.info(f"Binary mask shape: {mask.shape}, non-zero pixels: {np.sum(mask > 0)}")
         return pred_map, mask
 
     except Exception as e:
@@ -590,13 +598,24 @@ def analyze_wound():
         doctor_report = generate_doctor_report(metrics, healing_stage, timestamp)
         
         # Build visuals
+        logger.info(f"Building heatmap from pred_map shape: {pred_map.shape}, dtype: {pred_map.dtype}")
         heatmap_bgr = make_heatmap(pred_map)                          # HxWx3 (BGR)
+        logger.info(f"Heatmap created: shape {heatmap_bgr.shape}, dtype {heatmap_bgr.dtype}")
+        
+        logger.info(f"Building overlay from image shape: {img_array[0].shape}")
         overlay_bgr = make_overlay(img_array[0], heatmap_bgr, 0.45)   # HxWx3 (BGR)
+        logger.info(f"Overlay created: shape {overlay_bgr.shape}, dtype {overlay_bgr.dtype}")
         
         # Encode images
+        logger.info("Encoding images to base64...")
         mask_b64     = to_base64_png(mask)          # grayscale
         heatmap_b64  = to_base64_png(heatmap_bgr)   # color heatmap
         overlay_b64  = to_base64_png(overlay_bgr)   # blended on original
+        
+        logger.info(f"Image encoding complete:")
+        logger.info(f"  - mask_b64 length: {len(mask_b64)}")
+        logger.info(f"  - heatmap_b64 length: {len(heatmap_b64)}")
+        logger.info(f"  - overlay_b64 length: {len(overlay_b64)}")
         
         result = {
             "success": True,
@@ -610,6 +629,7 @@ def analyze_wound():
         }
         
         logger.info(f"Analysis completed: {metrics}, Stage: {healing_stage['stage']}")
+        logger.info(f"Returning JSON with {len(result)} keys: {list(result.keys())}")
         return jsonify(result)
         
     except Exception as e:
@@ -651,6 +671,13 @@ def analyzer():
     elif os.path.exists('index.html'):
         return send_from_directory('.', 'index.html')
     return jsonify({"error": "Analyzer not found"}), 404
+
+@app.route('/debug-ui', methods=['GET'])
+def debug_ui():
+    """Debug UI to see what API returns"""
+    if os.path.exists('debug_analyzer.html'):
+        return send_from_directory('.', 'debug_analyzer.html')
+    return jsonify({"error": "Debug UI not found"}), 404
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
