@@ -1,6 +1,6 @@
 """
 Free Tier Optimized Wound Detection API
-Optimized for Railway deployment (Python 3.10 + TF 2.12)
+Optimized for Railway deployment (Python 3.10 + TF 2.16 + Keras 3)
 """
 import os
 import sys
