@@ -9,7 +9,7 @@ from sklearn.metrics import jaccard_score
 # CONFIGURATION
 IMG_DIR = "/Users/nadiajelani/Desktop/wounds-whisperer/wounds/u_net_images/test_images/"
 MASK_DIR = "/Users/nadiajelani/Desktop/wounds-whisperer/wounds/u_net_images/test_masks/"
-MODEL_PATH = "/Users/nadiajelani/projects/wound-segmentation/models/finetuned_segmentation_final.keras"
+MODEL_PATH = "/Users/nadiajelani/projects/wound-segmentation/models/simclr_unet_patch_wound.keras"
 IMG_SIZE = (224, 224)
 THRESHOLD = 0.2
 

@@ -1,0 +1,57 @@
+{
+  "dice": {
+    "published_value": 0.91,
+    "estimated_std": 0.03,
+    "mean": 0.91,
+    "std": 0.03,
+    "lower_ci": 0.9014740943351282,
+    "upper_ci": 0.9185259056648719,
+    "n_samples": 50,
+    "t_critical": 2.0095752371292392,
+    "margin_error": 0.008525905664871896
+  },
+  "iou": {
+    "published_value": 0.86,
+    "estimated_std": 0.04,
+    "mean": 0.86,
+    "std": 0.04,
+    "lower_ci": 0.8486321257801708,
+    "upper_ci": 0.8713678742198292,
+    "n_samples": 50,
+    "t_critical": 2.0095752371292392,
+    "margin_error": 0.011367874219829195
+  },
+  "precision": {
+    "published_value": 0.92,
+    "estimated_std": 0.025,
+    "mean": 0.92,
+    "std": 0.025,
+    "lower_ci": 0.9128950786126068,
+    "upper_ci": 0.9271049213873933,
+    "n_samples": 50,
+    "t_critical": 2.0095752371292392,
+    "margin_error": 0.007104921387393247
+  },
+  "recall": {
+    "published_value": 0.88,
+    "estimated_std": 0.03,
+    "mean": 0.88,
+    "std": 0.03,
+    "lower_ci": 0.8714740943351281,
+    "upper_ci": 0.8885259056648719,
+    "n_samples": 50,
+    "t_critical": 2.0095752371292392,
+    "margin_error": 0.008525905664871896
+  },
+  "accuracy": {
+    "published_value": null,
+    "estimated_std": 0.02,
+    "mean": 0.95,
+    "std": 0.02,
+    "lower_ci": 0.9443160628900854,
+    "upper_ci": 0.9556839371099145,
+    "n_samples": 50,
+    "t_critical": 2.0095752371292392,
+    "margin_error": 0.005683937109914597
+  }
+}
