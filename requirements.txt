@@ -4,9 +4,11 @@ flask-cors==4.0.1
 gunicorn==21.2.0
 
 # --- ML stack (Keras 3 + TF 2.16) ---
+# Install numpy first to ensure compatibility
+numpy==1.24.0
+# TensorFlow 2.16.1 requires numpy>=1.24,<1.27
 tensorflow==2.16.1
 keras==3.3.3
-numpy==1.26.4
 typing-extensions>=4.6.0
 protobuf==4.25.3
 h5py==3.11.0
