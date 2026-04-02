@@ -186,7 +186,7 @@ def load_model():
         # Set Keras backend before importing Keras
         os.environ.setdefault("KERAS_BACKEND", "tensorflow")
         
-        model_path = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
+        model_path = os.getenv("SIMCLR_MODEL_PATH", "/tmp/models/simclr_unet_patch_wound.keras")
         model_url  = os.getenv("SIMCLR_MODEL_URL", "")
         tag        = os.getenv("SIMCLR_MODEL_TAG", "v1.0.0")
         repo_full  = os.getenv("SIMCLR_MODEL_REPO", "nadiajelani/wound-segmentation")
@@ -379,7 +379,7 @@ def health_check():
 @app.route('/debug', methods=['GET'])
 def debug_info():
     """Debug information endpoint"""
-    model_path = os.getenv('SIMCLR_MODEL_PATH', '/app/models/simclr_unet_patch_wound.keras')
+    model_path = os.getenv('SIMCLR_MODEL_PATH', '/tmp/models/simclr_unet_patch_wound.keras')
     return jsonify({
         "model_loaded": MODEL_LOADED,
         "model_exists": MODEL is not None,
@@ -394,7 +394,7 @@ def debug_info():
 @app.route("/diag", methods=['GET'])
 def diag():
     """Diagnostics endpoint to see what the container sees"""
-    p = os.getenv("SIMCLR_MODEL_PATH", "/app/models/simclr_unet_patch_wound.keras")
+    p = os.getenv("SIMCLR_MODEL_PATH", "/tmp/models/simclr_unet_patch_wound.keras")
     exists = os.path.exists(p)
     size = os.path.getsize(p) if exists else 0
     return jsonify({
