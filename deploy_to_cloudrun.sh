@@ -21,8 +21,8 @@ CPU="2"
 TIMEOUT="600s"                       # model download can take ~60s on first boot
 
 # ── Secrets (set these before running) ────────────────────────────────────────
-GITHUB_TOKEN=""                      # your GitHub token (for model download)
-API_KEYS="wai_changeme123"           # comma-separated API keys
+GITHUB_TOKEN="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"                      # your GitHub token (for model download)
+API_KEYS="wound-123"           # comma-separated API keys
 ADMIN_KEY="admin_changeme"
 SECRET_KEY="wound-secret-$(date +%s)"
 
