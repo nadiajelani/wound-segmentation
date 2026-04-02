@@ -3,444 +3,748 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wound Detection AI - Free Public Service</title>
+    <title>WoundAI — Clinical Wound Assessment</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg:        #0a0c10;
+            --surface:   #111318;
+            --surface2:  #181c24;
+            --border:    rgba(255,255,255,0.07);
+            --accent:    #00e5a0;
+            --accent2:   #0099ff;
+            --warn:      #ff6b3d;
+            --mild:      #00e5a0;
+            --moderate:  #f5c518;
+            --severe:    #ff4444;
+            --text:      #e8eaf0;
+            --muted:     #5a6070;
+            --r:         16px;
         }
-        
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Syne', sans-serif;
             min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px;
-            text-align: center;
-        }
-        
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            font-size: 1.2rem;
-            opacity: 0.9;
-        }
-        
-        .main-content {
-            padding: 40px;
-        }
-        
-        .upload-section {
-            border: 3px dashed #667eea;
-            border-radius: 15px;
-            padding: 40px;
-            text-align: center;
-            margin-bottom: 30px;
-            transition: all 0.3s ease;
-        }
-        
-        .upload-section:hover {
-            border-color: #764ba2;
-            background: #f8f9ff;
-        }
-        
-        .upload-section.dragover {
-            border-color: #764ba2;
-            background: #f0f2ff;
-        }
-        
-        .upload-icon {
-            font-size: 4rem;
-            color: #667eea;
-            margin-bottom: 20px;
-        }
-        
-        .upload-text {
-            font-size: 1.2rem;
-            color: #333;
-            margin-bottom: 20px;
-        }
-        
-        .file-input {
-            display: none;
-        }
-        
-        .upload-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 25px;
-            font-size: 1.1rem;
-            cursor: pointer;
-            transition: transform 0.2s ease;
-        }
-        
-        .upload-btn:hover {
-            transform: translateY(-2px);
-        }
-        
-        .analyze-btn {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 25px;
-            font-size: 1.1rem;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: transform 0.2s ease;
-        }
-        
-        .analyze-btn:hover {
-            transform: translateY(-2px);
-        }
-        
-        .analyze-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .results-section {
-            margin-top: 30px;
-            padding: 30px;
-            background: #f8f9fa;
-            border-radius: 15px;
-            display: none;
-        }
-        
-        .results-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .result-card {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
-        
-        .result-card h3 {
-            color: #667eea;
-            margin-bottom: 15px;
-        }
-        
-        .metric {
             display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Header ── */
+        .header {
+            padding: 18px 40px;
+            display: flex;
+            align-items: center;
             justify-content: space-between;
-            margin-bottom: 10px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(10,12,16,0.92);
+            backdrop-filter: blur(14px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            gap: 16px;
         }
-        
-        .metric-label {
-            font-weight: bold;
-            color: #333;
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-mark {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            display: flex; align-items: center; justify-content: center; font-size: 18px;
         }
-        
-        .metric-value {
-            color: #667eea;
-            font-weight: bold;
+        .logo-text { font-family: 'DM Serif Display', serif; font-size: 20px; }
+        .logo-text span { color: var(--accent); }
+
+        .status-pill {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 14px; border-radius: 999px;
+            border: 1px solid var(--border);
+            font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted);
         }
-        
-        .image-preview {
-            max-width: 100%;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--muted); transition: background 0.3s;
         }
-        
-        .loading {
-            display: none;
+        .dot.online  { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        .dot.loading { background: var(--moderate); animation: pulse 1s infinite; }
+        .dot.offline { background: var(--severe); }
+
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        @keyframes spin  { to { transform: rotate(360deg); } }
+        @keyframes fadeUp {
+            from { opacity:0; transform:translateY(20px); }
+            to   { opacity:1; transform:translateY(0); }
+        }
+
+        /* ── Main ── */
+        .main {
+            flex: 1;
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 52px 40px;
+        }
+
+        /* ── Hero ── */
+        .hero { text-align: center; margin-bottom: 52px; animation: fadeUp 0.6s ease; }
+        .eyebrow {
+            display: inline-block;
+            font-family: 'DM Mono', monospace;
+            font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase;
+            color: var(--accent); margin-bottom: 18px;
+        }
+        .hero h1 {
+            font-family: 'DM Serif Display', serif;
+            font-size: clamp(36px, 5vw, 62px);
+            line-height: 1.1; letter-spacing: -1px; margin-bottom: 18px;
+        }
+        .hero h1 em { color: var(--accent); font-style: italic; }
+        .hero p { color: var(--muted); font-size: 16px; max-width: 500px; margin: 0 auto; line-height: 1.65; }
+
+        /* ── Upload ── */
+        .upload-card {
+            background: var(--surface);
+            border: 1.5px dashed rgba(0,229,160,0.2);
+            border-radius: var(--r);
+            padding: 52px 40px;
             text-align: center;
-            padding: 20px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            position: relative; overflow: hidden;
+            min-height: 240px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 18px;
+            animation: fadeUp 0.6s 0.1s ease both;
         }
-        
+        .upload-card::before {
+            content: '';
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse at 50% 0%, rgba(0,229,160,0.05) 0%, transparent 70%);
+            pointer-events: none;
+        }
+        .upload-card:hover, .upload-card.dragover {
+            border-color: var(--accent);
+            background: rgba(0,229,160,0.03);
+        }
+        .upload-card.has-file { border-color: rgba(0,229,160,0.4); border-style: solid; }
+        .upload-icon { font-size: 48px; opacity: 0.45; }
+        .upload-title { font-size: 18px; font-weight: 700; }
+        .upload-sub { color: var(--muted); font-size: 13px; }
+        .browse-btn {
+            padding: 10px 24px; border-radius: 8px;
+            border: 1px solid var(--accent); background: transparent; color: var(--accent);
+            font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .browse-btn:hover { background: var(--accent); color: var(--bg); }
+
+        /* Preview */
+        .preview-wrap { position: relative; max-width: 300px; margin: 0 auto; }
+        .preview-img { width: 100%; border-radius: 12px; display: block; }
+        .preview-clear {
+            position: absolute; top: -10px; right: -10px;
+            width: 28px; height: 28px; border-radius: 50%;
+            background: var(--warn); border: 2px solid var(--bg);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 13px; color: white; transition: transform 0.2s;
+        }
+        .preview-clear:hover { transform: scale(1.15); }
+
+        /* Analyze button */
+        .analyze-btn {
+            width: 100%; padding: 16px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border: none; border-radius: 10px;
+            font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 800;
+            color: var(--bg); cursor: pointer;
+            transition: opacity 0.2s, transform 0.2s;
+            margin-top: 10px;
+            animation: fadeUp 0.6s 0.2s ease both;
+        }
+        .analyze-btn:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+        .analyze-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+        /* ── Loading ── */
+        .loading-wrap {
+            display: flex; flex-direction: column;
+            align-items: center; gap: 20px; padding: 60px 0;
+        }
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
+            width: 52px; height: 52px; border-radius: 50%;
+            border: 3px solid var(--border); border-top-color: var(--accent);
+            animation: spin 0.85s linear infinite;
         }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .loading-steps { width: 100%; max-width: 260px; display: flex; flex-direction: column; gap: 10px; }
+        .step {
+            display: flex; align-items: center; gap: 10px;
+            font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted);
         }
-        
-        .error {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 20px 0;
-            display: none;
+        .step.active { color: var(--accent); }
+        .step.done   { color: var(--text); }
+        .step-icon { width: 16px; text-align: center; }
+
+        /* ── Results ── */
+        .results-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 24px; margin-top: 40px;
+            animation: fadeUp 0.5s ease;
         }
-        
-        .success {
-            background: #d4edda;
-            color: #155724;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 20px 0;
-            display: none;
+        @media (max-width: 860px) { .results-grid { grid-template-columns: 1fr; } }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--r); overflow: hidden;
         }
-        
+        .card-header {
+            padding: 16px 20px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .card-title {
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted);
+        }
+        .card-body { padding: 20px; }
+
+        /* Image tabs */
+        .img-tabs { display: flex; gap: 4px; padding: 14px 20px 0; }
+        .tab {
+            padding: 6px 13px; border-radius: 6px; border: none;
+            background: transparent; color: var(--muted);
+            font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .tab.active { background: var(--surface2); color: var(--text); }
+        .tab:hover:not(.active) { color: var(--text); }
+        .result-img { width: 100%; display: block; border-radius: 8px; }
+
+        /* Metrics */
+        .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .metric-card {
+            background: var(--surface2); border-radius: 10px;
+            padding: 16px; display: flex; flex-direction: column; gap: 4px;
+        }
+        .metric-label {
+            font-family: 'DM Mono', monospace; font-size: 10px;
+            color: var(--muted); text-transform: uppercase; letter-spacing: 1px;
+        }
+        .metric-value {
+            font-family: 'DM Serif Display', serif;
+            font-size: 28px; color: var(--text);
+        }
+        .metric-unit { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+        .badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 4px 12px; border-radius: 999px;
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+        }
+        .badge.mild     { background: rgba(0,229,160,0.15); color: var(--mild); }
+        .badge.moderate { background: rgba(245,197,24,0.15); color: var(--moderate); }
+        .badge.severe   { background: rgba(255,68,68,0.15);  color: var(--severe); }
+
+        /* Download */
+        .dl-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+        .dl-btn {
+            flex: 1; min-width: 90px; padding: 9px 12px;
+            border: 1px solid var(--border); border-radius: 8px;
+            background: transparent; color: var(--text);
+            font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 5px;
+        }
+        .dl-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* Error */
+        .error-box {
+            background: rgba(255,107,61,0.08); border: 1px solid rgba(255,107,61,0.25);
+            border-radius: var(--r); padding: 20px;
+            display: flex; gap: 14px; align-items: flex-start; margin-top: 16px;
+        }
+        .error-title { font-weight: 700; margin-bottom: 4px; }
+        .error-msg { color: var(--muted); font-size: 13px; font-family: 'DM Mono', monospace; }
+
+        /* Footer */
         .footer {
-            text-align: center;
-            padding: 20px;
-            color: #666;
-            background: #f8f9fa;
+            text-align: center; padding: 28px;
+            border-top: 1px solid var(--border);
+            color: var(--muted); font-size: 11px; font-family: 'DM Mono', monospace;
         }
-        
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 2rem;
-            }
-            
-            .main-content {
-                padding: 20px;
-            }
-            
-            .upload-section {
-                padding: 20px;
-            }
+
+        /* Results header */
+        .results-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 4px;
         }
+        .results-title { font-family: 'DM Serif Display', serif; font-size: 24px; }
+        .new-btn {
+            padding: 8px 18px; border-radius: 8px;
+            border: 1px solid var(--accent); background: transparent; color: var(--accent);
+            font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .new-btn:hover { background: var(--accent); color: var(--bg); }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🩹 Wound Detection AI</h1>
-            <p>Free AI-powered wound analysis and healing assessment</p>
-        </div>
-        
-        <div class="main-content">
-            <div class="upload-section" id="uploadSection">
-                <div class="upload-icon">📸</div>
-                <div class="upload-text">
-                    Drag and drop your wound image here, or click to browse
-                </div>
-                <input type="file" id="imageInput" class="file-input" accept="image/*">
-                <button class="upload-btn" onclick="document.getElementById('imageInput').click()">
-                    Choose Image
-                </button>
+
+<!-- ── Header ── -->
+<header class="header">
+    <div class="logo">
+        <div class="logo-mark">🩹</div>
+        <div class="logo-text">Wound<span>AI</span></div>
+    </div>
+    <div class="status-pill">
+        <div class="dot" id="statusDot"></div>
+        <span id="statusText">Connecting…</span>
+    </div>
+</header>
+
+<!-- ── Main ── -->
+<main class="main" id="main">
+
+    <!-- Hero -->
+    <div class="hero" id="heroSection">
+        <span class="eyebrow">AI-Powered Clinical Analysis</span>
+        <h1>Wound <em>Segmentation</em><br>& Assessment</h1>
+        <p>Upload a wound image for instant AI analysis — segmentation mask, heatmap, severity scoring, and clinical metrics.</p>
+    </div>
+
+    <!-- Upload -->
+    <div id="uploadSection">
+        <div class="upload-card" id="dropZone">
+            <div id="uploadPlaceholder">
+                <div class="upload-icon">🖼</div>
+                <div class="upload-title">Drop wound image here</div>
+                <div class="upload-sub">JPEG or PNG · Max 8 MB</div>
+                <button class="browse-btn" onclick="document.getElementById('fileInput').click()">Browse files</button>
             </div>
-            
-            <div class="loading" id="loading">
-                <div class="spinner"></div>
-                <p>Analyzing wound... This may take a few moments.</p>
-            </div>
-            
-            <div class="error" id="error"></div>
-            <div class="success" id="success"></div>
-            
-            <button class="analyze-btn" id="analyzeBtn" onclick="analyzeWound()" disabled>
-                🔍 Analyze Wound
-            </button>
-            
-            <div class="results-section" id="resultsSection">
-                <h2>Analysis Results</h2>
-                <div class="results-grid">
-                    <div class="result-card">
-                        <h3>📊 Wound Metrics</h3>
-                        <div id="metrics"></div>
-                    </div>
-                    <div class="result-card">
-                        <h3>🖼️ Original Image</h3>
-                        <img id="originalImage" class="image-preview" alt="Original image">
-                    </div>
-                    <div class="result-card">
-                        <h3>🎯 Wound Mask</h3>
-                        <img id="maskImage" class="image-preview" alt="Wound mask">
-                    </div>
+            <div id="previewSection" style="display:none; width:100%">
+                <div class="preview-wrap">
+                    <img class="preview-img" id="previewImg" alt="preview">
+                    <div class="preview-clear" id="clearBtn">✕</div>
                 </div>
             </div>
         </div>
-        
-        <div class="footer">
-            <p>Powered by AI • Free Public Service • No Registration Required</p>
+        <input type="file" id="fileInput" accept="image/*" style="display:none">
+        <button class="analyze-btn" id="analyzeBtn" disabled onclick="analyze()">
+            Select an image to begin
+        </button>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingSection" style="display:none">
+        <div class="loading-wrap">
+            <div class="spinner"></div>
+            <div class="loading-steps">
+                <div class="step active" id="s0"><span class="step-icon">›</span>Uploading image…</div>
+                <div class="step" id="s1"><span class="step-icon">·</span>Preprocessing…</div>
+                <div class="step" id="s2"><span class="step-icon">·</span>Running U-Net inference…</div>
+                <div class="step" id="s3"><span class="step-icon">·</span>Computing metrics…</div>
+                <div class="step" id="s4"><span class="step-icon">·</span>Generating heatmap…</div>
+            </div>
         </div>
     </div>
 
-    <script>
-        // Configuration - Use relative path for same-origin requests
-        const API_URL = ''; // Use relative path for same-origin requests
-        
-        let selectedFile = null;
-        
-        // File input handling
-        document.getElementById('imageInput').addEventListener('change', handleFileSelect);
-        
-        // Drag and drop handling
-        const uploadSection = document.getElementById('uploadSection');
-        
-        uploadSection.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadSection.classList.add('dragover');
-        });
-        
-        uploadSection.addEventListener('dragleave', () => {
-            uploadSection.classList.remove('dragover');
-        });
-        
-        uploadSection.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadSection.classList.remove('dragover');
-            
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFileSelect({ target: { files: files } });
-            }
-        });
-        
-        function handleFileSelect(event) {
-            const file = event.target.files[0];
-            if (file && file.type.startsWith('image/')) {
-                selectedFile = file;
-                document.getElementById('analyzeBtn').disabled = false;
-                showSuccess('Image selected successfully!');
-                
-                // Show preview
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    document.getElementById('originalImage').src = e.target.result;
-                };
-                reader.readAsDataURL(file);
+    <!-- Error -->
+    <div id="errorSection" style="display:none">
+        <div class="error-box">
+            <span style="font-size:22px">⚠️</span>
+            <div>
+                <div class="error-title">Analysis Failed</div>
+                <div class="error-msg" id="errorMsg"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsSection" style="display:none">
+        <div class="results-header">
+            <div class="results-title">Analysis Complete</div>
+            <button class="new-btn" onclick="reset()">← New Analysis</button>
+        </div>
+
+        <div class="results-grid">
+            <!-- Left col -->
+            <div style="display:flex;flex-direction:column;gap:24px">
+
+                <!-- Image viewer -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Segmentation Output</span></div>
+                    <div class="img-tabs">
+                        <button class="tab" onclick="showTab('original')">Original</button>
+                        <button class="tab" onclick="showTab('mask')">Mask</button>
+                        <button class="tab" onclick="showTab('heatmap')">Heatmap</button>
+                        <button class="tab active" onclick="showTab('overlay')">Overlay</button>
+                    </div>
+                    <div class="card-body">
+                        <img class="result-img" id="tabImg" alt="result">
+                        <div class="dl-row">
+                            <button class="dl-btn" onclick="download('mask')">↓ Mask</button>
+                            <button class="dl-btn" onclick="download('heatmap')">↓ Heatmap</button>
+                            <button class="dl-btn" onclick="download('overlay')">↓ Overlay</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Metrics -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Wound Metrics</span>
+                        <span class="badge" id="severityBadge">—</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <span class="metric-label">Area</span>
+                                <span class="metric-value" id="mArea">—</span>
+                                <span class="metric-unit">pixels</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Coverage</span>
+                                <span class="metric-value" id="mPct">—</span>
+                                <span class="metric-unit">% of image</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Perimeter</span>
+                                <span class="metric-value" id="mPerim">—</span>
+                                <span class="metric-unit">px</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Severity</span>
+                                <div style="margin-top:8px">
+                                    <span class="badge" id="severityBadge2">—</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Right col — placeholder for healing/skin/report if API returns them -->
+            <div style="display:flex;flex-direction:column;gap:24px">
+
+                <div class="card" id="healingCard" style="display:none">
+                    <div class="card-header"><span class="card-title">Healing Stage</span></div>
+                    <div class="card-body">
+                        <div style="font-family:'DM Serif Display',serif;font-size:22px;margin-bottom:10px" id="healingStage">—</div>
+                        <div style="color:var(--muted);font-size:14px;line-height:1.6;margin-bottom:14px" id="healingDesc"></div>
+                        <div id="healingRecs"></div>
+                    </div>
+                </div>
+
+                <div class="card" id="skinCard" style="display:none">
+                    <div class="card-header"><span class="card-title">Skin Analysis</span></div>
+                    <div class="card-body">
+                        <div style="display:flex;align-items:center;gap:14px">
+                            <div id="skinSwatch" style="width:46px;height:46px;border-radius:50%;border:2px solid var(--border);flex-shrink:0"></div>
+                            <div>
+                                <div style="font-size:15px;font-weight:700" id="skinType">—</div>
+                                <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted)" id="skinFitz"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="reportCard" style="display:none">
+                    <div class="card-header"><span class="card-title">Clinical Report</span></div>
+                    <div class="card-body">
+                        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:14px" id="reportId"></div>
+                        <div id="reportFindings"></div>
+                        <div id="reportFollowup"></div>
+                    </div>
+                </div>
+
+                <!-- Timestamp card always shown -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Analysis Info</span></div>
+                    <div class="card-body">
+                        <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);line-height:1.8">
+                            <div>Model: SimCLR + U-Net</div>
+                            <div>Input: 128×128px</div>
+                            <div id="tsLine">Timestamp: —</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</main>
+
+<footer class="footer">
+    WoundAI · SimCLR + U-Net · Google Cloud Run · For research use only
+</footer>
+
+<script>
+    // ── Config ────────────────────────────────────────────────────────────────
+    const API_URL = '';   // empty = same origin (Flask serves this file)
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    let selectedFile = null;
+    let originalDataUrl = null;
+    let resultData = {};
+
+    // Tab images
+    const tabImages = { original: null, mask: null, heatmap: null, overlay: null };
+    let activeTab = 'overlay';
+
+    // ── Health check ──────────────────────────────────────────────────────────
+    async function checkHealth() {
+        const dot  = document.getElementById('statusDot');
+        const text = document.getElementById('statusText');
+        dot.className = 'dot loading'; text.textContent = 'Connecting…';
+        try {
+            const r = await fetch(API_URL + '/health');
+            const d = await r.json();
+            if (d.model_loaded) {
+                dot.className = 'dot online'; text.textContent = 'API Online';
             } else {
-                showError('Please select a valid image file.');
+                dot.className = 'dot loading'; text.textContent = 'Model Loading…';
+                setTimeout(checkHealth, 8000);
             }
+        } catch {
+            dot.className = 'dot offline'; text.textContent = 'Offline';
         }
-        
-        async function analyzeWound() {
-            if (!selectedFile) {
-                showError('Please select an image first.');
-                return;
+    }
+    checkHealth();
+
+    // ── File handling ─────────────────────────────────────────────────────────
+    const dropZone  = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    dropZone.addEventListener('click', () => { if (!selectedFile) fileInput.click(); });
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault(); dropZone.classList.remove('dragover');
+        handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+    document.getElementById('clearBtn').addEventListener('click', e => { e.stopPropagation(); reset(); });
+
+    function handleFile(f) {
+        if (!f || !f.type.startsWith('image/')) return;
+        selectedFile = f;
+        const reader = new FileReader();
+        reader.onload = e => {
+            originalDataUrl = e.target.result;
+            document.getElementById('previewImg').src = originalDataUrl;
+            document.getElementById('uploadPlaceholder').style.display = 'none';
+            document.getElementById('previewSection').style.display = 'block';
+            dropZone.classList.add('has-file');
+        };
+        reader.readAsDataURL(f);
+        const btn = document.getElementById('analyzeBtn');
+        btn.disabled = false;
+        btn.textContent = '🔍  Analyze Wound';
+        hideError();
+    }
+
+    // ── Loading steps animation ───────────────────────────────────────────────
+    let stepTimer;
+    function startSteps() {
+        let s = 0;
+        const steps = ['s0','s1','s2','s3','s4'];
+        steps.forEach((id, i) => {
+            const el = document.getElementById(id);
+            el.className = 'step';
+            el.querySelector('.step-icon').textContent = '·';
+        });
+        const el0 = document.getElementById('s0');
+        el0.classList.add('active');
+        el0.querySelector('.step-icon').textContent = '›';
+
+        stepTimer = setInterval(() => {
+            const prev = document.getElementById(steps[s]);
+            prev.className = 'step done';
+            prev.querySelector('.step-icon').textContent = '✓';
+            s++;
+            if (s < steps.length) {
+                const cur = document.getElementById(steps[s]);
+                cur.classList.add('active');
+                cur.querySelector('.step-icon').textContent = '›';
+            } else {
+                clearInterval(stepTimer);
             }
-            
-            showLoading(true);
-            hideMessages();
-            
-            try {
-                // Convert file to base64
-                const base64 = await fileToBase64(selectedFile);
-                
-                // Send to API
-                const response = await fetch(`${API_URL}/analyze`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        image_data: base64
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    displayResults(result);
-                    showSuccess('Analysis completed successfully!');
-                } else {
-                    throw new Error(result.error || 'Analysis failed');
-                }
-                
-            } catch (error) {
-                console.error('Analysis error:', error);
-                showError(`Analysis failed: ${error.message}`);
-            } finally {
-                showLoading(false);
+        }, 900);
+    }
+
+    // ── Analyze ───────────────────────────────────────────────────────────────
+    async function analyze() {
+        if (!selectedFile) return;
+
+        // Show loading
+        document.getElementById('uploadSection').style.display = 'none';
+        document.getElementById('heroSection').style.display = 'none';
+        document.getElementById('resultsSection').style.display = 'none';
+        document.getElementById('loadingSection').style.display = 'block';
+        hideError();
+        startSteps();
+
+        try {
+            const fd = new FormData();
+            fd.append('image', selectedFile);
+
+            const res = await fetch(API_URL + '/analyze', { method: 'POST', body: fd });
+
+            clearInterval(stepTimer);
+
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Analysis failed');
+
+            // Store results
+            tabImages.original = originalDataUrl;
+            tabImages.mask     = data.mask_image;
+            tabImages.heatmap  = data.heatmap_image;
+            tabImages.overlay  = data.overlay_image;
+            resultData = data;
+
+            showResults(data);
+
+        } catch (err) {
+            clearInterval(stepTimer);
+            document.getElementById('loadingSection').style.display = 'none';
+            document.getElementById('uploadSection').style.display = 'block';
+            showError(err.message);
+        }
+    }
+
+    function showResults(data) {
+        document.getElementById('loadingSection').style.display = 'none';
+        document.getElementById('resultsSection').style.display = 'block';
+
+        // Active tab image
+        showTab('overlay');
+
+        // Metrics
+        const m = data.metrics || {};
+        document.getElementById('mArea').textContent  = (m.area_pixels || 0).toLocaleString();
+        document.getElementById('mPct').textContent   = (m.area_percentage || 0).toFixed(2);
+        document.getElementById('mPerim').textContent = (m.perimeter || 0).toLocaleString();
+
+        const sev = (m.severity || 'mild').toLowerCase();
+        ['severityBadge','severityBadge2'].forEach(id => {
+            const el = document.getElementById(id);
+            el.textContent = '● ' + (m.severity || '—');
+            el.className = 'badge ' + sev;
+        });
+
+        // Timestamp
+        if (data.timestamp) {
+            document.getElementById('tsLine').textContent =
+                'Timestamp: ' + new Date(data.timestamp).toLocaleString();
+        }
+
+        // Healing stage (if present)
+        if (data.healing_stage) {
+            const h = data.healing_stage;
+            document.getElementById('healingStage').textContent = h.stage || '—';
+            document.getElementById('healingDesc').textContent  = h.description || '';
+            if (h.recommendations?.length) {
+                document.getElementById('healingRecs').innerHTML =
+                    h.recommendations.map(r => `<div style="display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--border);font-size:13px;color:var(--muted)"><span style="color:var(--accent)">▸</span>${r}</div>`).join('');
             }
+            document.getElementById('healingCard').style.display = 'block';
         }
-        
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = error => reject(error);
-            });
+
+        // Skin analysis (if present)
+        if (data.skin_analysis) {
+            const s = data.skin_analysis;
+            document.getElementById('skinType').textContent = s.skin_type || '—';
+            document.getElementById('skinFitz').textContent = 'Fitzpatrick ' + (s.fitzpatrick || '—');
+            if (s.rgb_avg) {
+                document.getElementById('skinSwatch').style.background =
+                    `rgb(${s.rgb_avg[0]},${s.rgb_avg[1]},${s.rgb_avg[2]})`;
+            }
+            document.getElementById('skinCard').style.display = 'block';
         }
-        
-        function displayResults(result) {
-            // Display metrics
-            const metricsDiv = document.getElementById('metrics');
-            metricsDiv.innerHTML = `
-                <div class="metric">
-                    <span class="metric-label">Area:</span>
-                    <span class="metric-value">${result.metrics.area_pixels} pixels</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Percentage:</span>
-                    <span class="metric-value">${result.metrics.area_percentage}%</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Perimeter:</span>
-                    <span class="metric-value">${result.metrics.perimeter} px</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Severity:</span>
-                    <span class="metric-value">${result.metrics.severity}</span>
-                </div>
-            `;
-            
-            // Display mask image
-            document.getElementById('maskImage').src = result.mask_image;
-            
-            // Show results
-            document.getElementById('resultsSection').style.display = 'block';
+
+        // Clinical report (if present)
+        if (data.doctor_report) {
+            const r = data.doctor_report;
+            document.getElementById('reportId').textContent =
+                'ID: ' + (r.report_id || '—') + ' · ' + new Date(r.generated_at || Date.now()).toLocaleString();
+            const findings = r.clinical_findings || {};
+            if (Object.keys(findings).length) {
+                document.getElementById('reportFindings').innerHTML =
+                    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:10px">Clinical Findings</div>' +
+                    Object.entries(findings).map(([k,v]) =>
+                        `<div style="display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--border);font-size:13px">
+                            <span style="color:var(--muted)">${k.replace(/_/g,' ')}</span>
+                            <span style="font-family:'DM Mono',monospace;font-size:12px">${v}</span>
+                        </div>`
+                    ).join('');
+            }
+            if (r.follow_up_care) {
+                document.getElementById('reportFollowup').innerHTML =
+                    `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin:14px 0 10px">Follow-up Care</div>
+                     <div style="font-size:13px;color:var(--muted);line-height:1.6;background:var(--surface2);padding:12px;border-radius:8px">${r.follow_up_care}</div>`;
+            }
+            document.getElementById('reportCard').style.display = 'block';
         }
-        
-        function showLoading(show) {
-            document.getElementById('loading').style.display = show ? 'block' : 'none';
-            document.getElementById('analyzeBtn').disabled = show;
-        }
-        
-        function showError(message) {
-            const errorDiv = document.getElementById('error');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-        }
-        
-        function showSuccess(message) {
-            const successDiv = document.getElementById('success');
-            successDiv.textContent = message;
-            successDiv.style.display = 'block';
-        }
-        
-        function hideMessages() {
-            document.getElementById('error').style.display = 'none';
-            document.getElementById('success').style.display = 'none';
-        }
-    </script>
+    }
+
+    // ── Image tabs ────────────────────────────────────────────────────────────
+    function showTab(name) {
+        activeTab = name;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        event?.target?.classList.add('active');
+        // re-select correct tab button if called programmatically
+        document.querySelectorAll('.tab').forEach(t => {
+            if (t.textContent.toLowerCase().startsWith(name)) t.classList.add('active');
+        });
+        document.getElementById('tabImg').src = tabImages[name] || '';
+    }
+
+    // ── Download ──────────────────────────────────────────────────────────────
+    function download(type) {
+        const src = tabImages[type];
+        if (!src) return;
+        const a = document.createElement('a');
+        a.href = src;
+        a.download = `wound_${type}_${Date.now()}.png`;
+        a.click();
+    }
+
+    // ── Reset ─────────────────────────────────────────────────────────────────
+    function reset() {
+        selectedFile = null; originalDataUrl = null;
+        tabImages.original = tabImages.mask = tabImages.heatmap = tabImages.overlay = null;
+
+        document.getElementById('uploadPlaceholder').style.display = 'block';
+        document.getElementById('previewSection').style.display = 'none';
+        document.getElementById('previewImg').src = '';
+        dropZone.classList.remove('has-file');
+        fileInput.value = '';
+
+        const btn = document.getElementById('analyzeBtn');
+        btn.disabled = true; btn.textContent = 'Select an image to begin';
+
+        document.getElementById('heroSection').style.display = 'block';
+        document.getElementById('uploadSection').style.display = 'block';
+        document.getElementById('resultsSection').style.display = 'none';
+        document.getElementById('loadingSection').style.display = 'none';
+
+        // Reset optional cards
+        ['healingCard','skinCard','reportCard'].forEach(id =>
+            document.getElementById(id).style.display = 'none');
+
+        hideError();
+    }
+
+    function showError(msg) {
+        document.getElementById('errorMsg').textContent = msg;
+        document.getElementById('errorSection').style.display = 'block';
+    }
+    function hideError() {
+        document.getElementById('errorSection').style.display = 'none';
+    }
+</script>
 </body>
 </html>
