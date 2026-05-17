@@ -150,6 +150,7 @@ def _download_via_github_api(dest: str) -> bool:
 
 
 def ensure_clean_model(path: str):
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     if not os.path.exists(path):
         return
     sz = os.path.getsize(path)
@@ -178,9 +179,13 @@ def load_model():
             elif not _download_via_github_api(MODEL_PATH):
                 raise FileNotFoundError("Model not found and no download succeeded")
 
-        import keras
-        logger.info(f"[MODEL] Loading with Keras {keras.__version__}")
-        MODEL = keras.models.load_model(MODEL_PATH, compile=False)
+        try:
+            import keras as _keras
+            logger.info(f"[MODEL] Using standalone Keras {_keras.__version__}")
+            MODEL = _keras.models.load_model(MODEL_PATH, compile=False)
+        except Exception:
+            logger.info("[MODEL] Falling back to tf.keras")
+            MODEL = tf.keras.models.load_model(MODEL_PATH, compile=False)
 
         # Warm-up pass
         dummy = np.zeros((1, IMG_SIZE[0], IMG_SIZE[1], 3), dtype=np.float32)
@@ -1067,18 +1072,20 @@ def handle_comments():
 # ─────────────────────────────────────────────────────────────────────────────
 # Startup
 # ─────────────────────────────────────────────────────────────────────────────
-logger.info("📦 Initialising database…")
-try:
-    _init_db()
-    logger.info("✅ Database ready")
-except Exception as e:
-    logger.warning(f"DB init warning: {e}")
+# ── Startup inside app context ──────────────────────────────────────────────
+with app.app_context():
+    logger.info("📦 Initialising database…")
+    try:
+        _init_db()
+        logger.info("✅ Database ready")
+    except Exception as e:
+        logger.warning(f"DB init warning: {e}")
 
-logger.info("📦 Loading model…")
-try:
-    load_model()
-except Exception as e:
-    logger.warning(f"Model load warning: {e}")
+    logger.info("📦 Loading model…")
+    try:
+        load_model()
+    except Exception as e:
+        logger.warning(f"Model load warning: {e}")
 
 logger.info("🎉 WoundAI v3.0 ready")
 
