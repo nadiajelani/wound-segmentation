@@ -540,7 +540,7 @@
 
     <script>
         // Configuration
-        const API_URL = 'https://your-app.up.railway.app'; // Replace with your Railway URL
+        const API_URL = 'https://wound-api-929636759806.us-central1.run.app'; // Replace with your Railway URL
         
         let currentImageFile = null;
         let currentResult = null;
@@ -671,9 +671,18 @@
             reader.readAsDataURL(currentImageFile);
 
             // Display all three images from backend
-            document.getElementById('maskImage').src = result.mask_image;
-            document.getElementById('heatmapImage').src = result.heatmap_image;
-            document.getElementById('overlayImage').src = result.overlay_image;
+            const toDataUrl = (b64) => b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
+            document.getElementById('maskImage').src    = toDataUrl(result.mask_image);
+            document.getElementById('heatmapImage').src = toDataUrl(result.heatmap_image);
+            document.getElementById('overlayImage').src = toDataUrl(result.overlay_image);
+
+            // v3 new images
+            const uncertaintyEl = document.getElementById('uncertaintyImage');
+            if (uncertaintyEl && result.uncertainty_image)
+                uncertaintyEl.src = toDataUrl(result.uncertainty_image);
+            const contourEl = document.getElementById('contourImage');
+            if (contourEl && result.contour_image)
+                contourEl.src = toDataUrl(result.contour_image);
 
             // Display metrics
             const metrics = result.metrics;
@@ -757,5 +766,39 @@
             }
         });
     </script>
+
+        <!-- v3 NEW CARDS -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:20px;">
+
+            <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                <h3 style="margin:0 0 12px;color:#2c3e50;font-size:1em;text-transform:uppercase;letter-spacing:1px;">🦠 Infection Risk</h3>
+                <div id="infectionRisk" style="color:#666;">Analysing...</div>
+            </div>
+
+            <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                <h3 style="margin:0 0 12px;color:#2c3e50;font-size:1em;text-transform:uppercase;letter-spacing:1px;">🧬 Tissue Composition</h3>
+                <div id="tissueComposition" style="color:#666;">Analysing...</div>
+            </div>
+
+            <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                <h3 style="margin:0 0 12px;color:#2c3e50;font-size:1em;text-transform:uppercase;letter-spacing:1px;">📊 Image Quality</h3>
+                <div id="qualityScore" style="color:#666;">—</div>
+                <div style="margin-top:8px;font-size:0.82em;color:#999;">Processing: <span id="processingTime">—</span></div>
+            </div>
+
+        </div>
+
+        <!-- v3 Uncertainty & Contour images (hidden if not present) -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;" id="v3ImagesRow">
+            <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);text-align:center;">
+                <h3 style="margin:0 0 8px;color:#2c3e50;font-size:0.9em;">Uncertainty Map</h3>
+                <img id="uncertaintyImage" style="width:100%;border-radius:8px;" alt="Uncertainty map" onerror="this.parentElement.style.display='none'"/>
+            </div>
+            <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);text-align:center;">
+                <h3 style="margin:0 0 8px;color:#2c3e50;font-size:0.9em;">Contour Overlay</h3>
+                <img id="contourImage" style="width:100%;border-radius:8px;" alt="Contour overlay" onerror="this.parentElement.style.display='none'"/>
+            </div>
+        </div>
+
 </body>
 </html>
