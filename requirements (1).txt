@@ -1,0 +1,20 @@
+# WoundAI v3.0 – Python dependencies
+# Install: pip install -r requirements.txt
+
+# Core ML
+tensorflow==2.16.2
+keras==3.3.3
+numpy==1.26.4
+
+# Image processing
+opencv-python-headless==4.10.0.84
+Pillow==10.4.0
+scikit-image==0.24.0        # for additional image quality metrics
+
+# Web framework
+Flask==3.0.3
+flask-cors==4.0.1
+gunicorn==21.2.0
+
+# Serialisation / utilities
+scipy==1.13.1               # used for morphological operations fallback
