@@ -1,0 +1,6 @@
+{"ts": "2026-05-17T09:48:18.883006+00:00", "event": "model_loaded", "req": "\u2014", "path": "/Users/nadiajelani/projects/wound-segmentation/models/simclr_unet_patch_wound.keras"}
+{"ts": "2026-05-17T09:57:24.445770+00:00", "event": "analyze_request", "req": "f9516545-6b3b-4e72-9e46-77ecc5c91920", "ip": "127.0.0.1"}
+{"ts": "2026-05-17T09:57:27.160248+00:00", "event": "analyze_ok", "req": "f9516545-6b3b-4e72-9e46-77ecc5c91920", "severity": "Severe", "fitz": 3, "risk": "high"}
+{"ts": "2026-05-17T20:59:26.430619+00:00", "event": "model_loaded", "req": "\u2014", "path": "/Users/nadiajelani/projects/wound-segmentation/models/simclr_unet_patch_wound.keras"}
+{"ts": "2026-05-17T20:59:41.972538+00:00", "event": "analyze_request", "req": "b819167e-41cb-4720-a7c5-e4b331911a8d", "ip": "127.0.0.1"}
+{"ts": "2026-05-17T20:59:43.232786+00:00", "event": "analyze_ok", "req": "b819167e-41cb-4720-a7c5-e4b331911a8d", "severity": "Severe", "fitz": 3, "risk": "high"}
