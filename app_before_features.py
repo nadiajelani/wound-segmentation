@@ -36,17 +36,6 @@ from typing import Optional
 
 # ── third-party ──────────────────────────────────────────────────────────────
 import numpy as np
-try:
-    from gradcam import (
-        make_gradcam, make_gradcam_overlay, extract_embedding,
-        wound_similarity, edge_sharpness, convexity_defect_score,
-        satellite_lesions, healing_score, texture_features, wound_orientation,
-    )
-    GRADCAM_ENABLED = True
-except ImportError as _e:
-    GRADCAM_ENABLED = False
-    import logging as _log
-    _log.getLogger("woundai").warning(f"gradcam.py not found — advanced features disabled: {_e}")
 import cv2
 from PIL import Image
 from flask import Flask, request, jsonify, send_from_directory, g, Blueprint

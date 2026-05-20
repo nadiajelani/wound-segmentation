@@ -15,4 +15,4 @@ h5py==3.11.0
 
 # --- Image / utils ---
 opencv-python-headless==4.10.0.84
-pillow==10.4.0
+pillow==10.4.0scikit-image==0.24.0
