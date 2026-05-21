@@ -36,28 +36,6 @@ from typing import Optional
 
 # ── third-party ──────────────────────────────────────────────────────────────
 import numpy as np
-try:
-    from wound_features import (
-        classify_wound_type, calculate_push_score,
-        compute_fractal_dimension, find_similar_wounds,
-        save_embedding, generate_pdf_report,
-    )
-    FEATURES_ENABLED = True
-    print("[INFO] wound_features loaded ✅")
-except ImportError as _fe:
-    FEATURES_ENABLED = False
-    print(f"[WARNING] wound_features not available: {_fe}")
-try:
-    from gradcam import (
-        make_gradcam, make_gradcam_overlay, extract_embedding,
-        wound_similarity, edge_sharpness, convexity_defect_score,
-        satellite_lesions, healing_score, texture_features, wound_orientation,
-    )
-    GRADCAM_ENABLED = True
-except ImportError as _e:
-    GRADCAM_ENABLED = False
-    import logging as _log
-    _log.getLogger("woundai").warning(f"gradcam.py not found — advanced features disabled: {_e}")
 import cv2
 from PIL import Image
 from flask import Flask, request, jsonify, send_from_directory, g, Blueprint
@@ -88,7 +66,7 @@ REPO_FULL          = os.getenv("SIMCLR_MODEL_REPO",   "nadiajelani/wound-segment
 MODEL_TAG          = os.getenv("SIMCLR_MODEL_TAG",    "v1.0.0")
 ASSET_NAME         = os.getenv("SIMCLR_MODEL_ASSET",  "simclr_unet_patch_wound.keras")
 
-IMG_SIZE           = (int(os.getenv("IMG_H", 224)), int(os.getenv("IMG_W", 224)))
+IMG_SIZE           = (int(os.getenv("IMG_H", 128)), int(os.getenv("IMG_W", 128)))
 MC_PASSES          = int(os.getenv("MC_PASSES",  "5"))
 MAX_FILE_BYTES     = int(os.getenv("MAX_FILE_MB", "8")) * 1024 * 1024
 AUDIT_LOG_PATH     = os.getenv("AUDIT_LOG",   "audit.jsonl")
@@ -310,14 +288,13 @@ def predict_with_uncertainty(img_arr: np.ndarray):
         mean_u8   = (mean_pm * 255).astype(np.uint8)
         otsu_val, _ = cv2.threshold(mean_u8, 0, 255,
                                     cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        thresh = max(0.20, min(0.65, float(otsu_val) / 255.0))
+        thresh = max(0.30, min(0.75, float(otsu_val) / 255.0))
         raw_mask = (mean_pm >= thresh).astype(np.uint8) * 255
 
         # Morphological cleanup
-        k_open  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(raw_mask, cv2.MORPH_OPEN,  k_open,  iterations=1)
-        mask = cv2.morphologyEx(mask,     cv2.MORPH_CLOSE, k_close, iterations=2)
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(raw_mask, cv2.MORPH_OPEN,  k, iterations=2)
+        mask = cv2.morphologyEx(mask,     cv2.MORPH_CLOSE, k, iterations=3)
 
         return mean_pm, std_pm, mask
     except Exception as e:
@@ -500,11 +477,7 @@ def score_infection(img_rgb_01: np.ndarray, mask: np.ndarray,
         peri_bool = peri > 0
         H_p = hsv[:, :, 0][peri_bool].astype(float)
         S_p = hsv[:, :, 1][peri_bool].astype(float)
-        V_p = hsv[:, :, 2][peri_bool].astype(float)
-        # Exclude very dark pixels (sutures, threads, shadow) — V < 40 is near-black
-        # Exclude desaturated pixels — not a true erythema signal
-        valid = (V_p > 40) & (S_p > 50)
-        ery_px   = np.sum(((H_p <= 10) | (H_p >= 160)) & valid)
+        ery_px   = np.sum(((H_p <= 10) | (H_p >= 160)) & (S_p > 60))
         ery_pct  = float(ery_px / max(peri_bool.sum(), 1) * 100)
 
         wound = mask > 0
@@ -1012,26 +985,6 @@ def analyze_wound():
         report    = generate_doctor_report(metrics, healing, skin,
                                             tissue, infection, timestamp)
 
-        # ── New features ────────────────────────────────────────────────────
-        wound_type  = {}
-        push_score  = {}
-        fractal_dim = None
-        if FEATURES_ENABLED:
-            try:
-                wound_type = classify_wound_type(img_arr[0], mask, metrics)
-            except Exception as _e:
-                logger.warning(f"Wound type failed: {_e}")
-            try:
-                area_cm2   = metrics.get("area_mm2", 0) / 100 if metrics.get("area_mm2") else None
-                exu_score  = infection.get("exudate_score", 0) if isinstance(infection, dict) else 0
-                push_score = calculate_push_score(area_cm2, exu_score, tissue if isinstance(tissue, dict) else {})
-            except Exception as _e:
-                logger.warning(f"PUSH score failed: {_e}")
-            try:
-                fractal_dim = round(compute_fractal_dimension(mask), 3)
-            except Exception as _e:
-                logger.warning(f"Fractal failed: {_e}")
-
         result = {
             "success":            True,
             "version":            VERSION,
@@ -1044,10 +997,6 @@ def analyze_wound():
             "healing_stage":      healing,
             "doctor_report":      report,
             "quality_report":     q_report,
-            "wound_type":         wound_type,
-            "push_score":         push_score,
-            "fractal_dimension":  fractal_dim,
-            "similar_wounds":     [],
             "mask_image":         _to_b64_png(mask),
             "heatmap_image":      _to_b64_png(hm),
             "uncertainty_image":  _to_b64_png(unc),

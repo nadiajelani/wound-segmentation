@@ -6,3 +6,12 @@
 {"ts": "2026-05-17T20:59:43.232786+00:00", "event": "analyze_ok", "req": "b819167e-41cb-4720-a7c5-e4b331911a8d", "severity": "Severe", "fitz": 3, "risk": "high"}
 {"ts": "2026-05-20T19:40:12.177126+00:00", "event": "analyze_request", "req": "5c4d8082-2d0d-4a99-9dd2-1acee77b0537", "ip": "127.0.0.1"}
 {"ts": "2026-05-20T19:40:12.377516+00:00", "event": "analyze_ok", "req": "5c4d8082-2d0d-4a99-9dd2-1acee77b0537", "severity": "Moderate", "fitz": 3, "risk": "high"}
+{"ts": "2026-05-20T19:49:09.259669+00:00", "event": "model_loaded", "req": "\u2014", "path": "/Users/nadiajelani/projects/wound-segmentation/models/wound_seg_256_v2.keras"}
+{"ts": "2026-05-20T19:49:19.856604+00:00", "event": "analyze_request", "req": "b20bd021-a69a-4ca5-b240-ed06fa39461c", "ip": "127.0.0.1"}
+{"ts": "2026-05-20T19:49:21.157892+00:00", "event": "analyze_ok", "req": "b20bd021-a69a-4ca5-b240-ed06fa39461c", "severity": "Severe", "fitz": 3, "risk": "high"}
+{"ts": "2026-05-20T19:53:04.091608+00:00", "event": "analyze_request", "req": "685ece10-9393-429d-851b-1d985e597ded", "ip": "127.0.0.1"}
+{"ts": "2026-05-20T19:53:05.030387+00:00", "event": "analyze_ok", "req": "685ece10-9393-429d-851b-1d985e597ded", "severity": "Severe", "fitz": 3, "risk": "high"}
+{"ts": "2026-05-20T19:53:06.269873+00:00", "event": "model_loaded", "req": "\u2014", "path": "/Users/nadiajelani/projects/wound-segmentation/models/wound_seg_256_v2.keras"}
+{"ts": "2026-05-20T19:56:05.616078+00:00", "event": "model_loaded", "req": "\u2014", "path": "/Users/nadiajelani/projects/wound-segmentation/models/wound_seg_256_v2.keras"}
+{"ts": "2026-05-20T19:56:09.440802+00:00", "event": "analyze_request", "req": "7d090d5a-492c-4513-b8be-c126b66010bc", "ip": "127.0.0.1"}
+{"ts": "2026-05-20T19:56:10.434761+00:00", "event": "analyze_ok", "req": "7d090d5a-492c-4513-b8be-c126b66010bc", "severity": "Severe", "fitz": 3, "risk": "high"}

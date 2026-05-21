@@ -37,17 +37,6 @@ from typing import Optional
 # ── third-party ──────────────────────────────────────────────────────────────
 import numpy as np
 try:
-    from wound_features import (
-        classify_wound_type, calculate_push_score,
-        compute_fractal_dimension, find_similar_wounds,
-        save_embedding, generate_pdf_report,
-    )
-    FEATURES_ENABLED = True
-    print("[INFO] wound_features loaded ✅")
-except ImportError as _fe:
-    FEATURES_ENABLED = False
-    print(f"[WARNING] wound_features not available: {_fe}")
-try:
     from gradcam import (
         make_gradcam, make_gradcam_overlay, extract_embedding,
         wound_similarity, edge_sharpness, convexity_defect_score,

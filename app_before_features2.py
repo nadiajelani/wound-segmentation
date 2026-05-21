@@ -37,17 +37,6 @@ from typing import Optional
 # ── third-party ──────────────────────────────────────────────────────────────
 import numpy as np
 try:
-    from wound_features import (
-        classify_wound_type, calculate_push_score,
-        compute_fractal_dimension, find_similar_wounds,
-        save_embedding, generate_pdf_report,
-    )
-    FEATURES_ENABLED = True
-    print("[INFO] wound_features loaded ✅")
-except ImportError as _fe:
-    FEATURES_ENABLED = False
-    print(f"[WARNING] wound_features not available: {_fe}")
-try:
     from gradcam import (
         make_gradcam, make_gradcam_overlay, extract_embedding,
         wound_similarity, edge_sharpness, convexity_defect_score,
@@ -1012,26 +1001,6 @@ def analyze_wound():
         report    = generate_doctor_report(metrics, healing, skin,
                                             tissue, infection, timestamp)
 
-        # ── New features ────────────────────────────────────────────────────
-        wound_type  = {}
-        push_score  = {}
-        fractal_dim = None
-        if FEATURES_ENABLED:
-            try:
-                wound_type = classify_wound_type(img_arr[0], mask, metrics)
-            except Exception as _e:
-                logger.warning(f"Wound type failed: {_e}")
-            try:
-                area_cm2   = metrics.get("area_mm2", 0) / 100 if metrics.get("area_mm2") else None
-                exu_score  = infection.get("exudate_score", 0) if isinstance(infection, dict) else 0
-                push_score = calculate_push_score(area_cm2, exu_score, tissue if isinstance(tissue, dict) else {})
-            except Exception as _e:
-                logger.warning(f"PUSH score failed: {_e}")
-            try:
-                fractal_dim = round(compute_fractal_dimension(mask), 3)
-            except Exception as _e:
-                logger.warning(f"Fractal failed: {_e}")
-
         result = {
             "success":            True,
             "version":            VERSION,
@@ -1044,10 +1013,6 @@ def analyze_wound():
             "healing_stage":      healing,
             "doctor_report":      report,
             "quality_report":     q_report,
-            "wound_type":         wound_type,
-            "push_score":         push_score,
-            "fractal_dimension":  fractal_dim,
-            "similar_wounds":     [],
             "mask_image":         _to_b64_png(mask),
             "heatmap_image":      _to_b64_png(hm),
             "uncertainty_image":  _to_b64_png(unc),

@@ -1,0 +1,13 @@
+.git
+venv/
+wound_seg_env/
+training_data/
+data/
+__pycache__/
+*.pyc
+models/*.keras
+models/wound_seg_env/
+models/simclr_unet_savedmodel/
+models/checkpoints/
+models/offline_results/
+models/wound_progress_report/
